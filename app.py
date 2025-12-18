@@ -152,7 +152,14 @@ def start_lesson_logic(client, level, mode, target_speaking_seconds):
     st.session_state.topic = topic
     st.session_state.last_audio_bytes = None
     
-    final_prompt = f"{system_role}\nCONTEXT: The student must try to use these words: {', '.join(target_vocab)}.\nIf they use one, PRAISE them briefly in parentheses."
+    final_prompt = f"""
+{system_role}
+TARGET VOCABULARY: {', '.join(target_vocab)}
+INSTRUCTIONS:
+1. If the user uses a target word, PRAISE them briefly in parentheses like (Good job using 'word'!).
+2. If the conversation is advancing and the user hasn't used the target words yet, ASK QUESTIONS that force them to use these specific words.
+3. Do not let the user finish the lesson without trying to use at least 3 of them.
+"""
     st.session_state.messages = [{"role": "system", "content": final_prompt}]
     
     try:
@@ -333,3 +340,4 @@ if api_key:
                         st.error(f"Hata: {e}")
 else:
     st.warning("Lütfen API Anahtarını girin.")
+
