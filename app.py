@@ -199,4 +199,86 @@ if api_key:
                 if user_data["next_mode"] != "ASSESSMENT" and elapsed_sec < target_sec:
                     missing = target_sec - elapsed_sec
                     st.toast("🚫 ÇIKIŞ YASAK!", icon="🔒")
-                    st.error(f"Disiplin! Daha {int
+                    st.error(f"Disiplin! Daha {int(missing // 60)} dk {int(missing % 60)} sn konuşmalısın.")
+                    
+                    st.session_state.messages.append({
+                        "role": "system", 
+                        "content": "User tried to quit early. Refuse strictly and ask a provocative question."
+                    })
+                    try:
+                        res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
+                        st.session_state.messages.append({"role": "assistant", "content": res.choices[0].message.content})
+                        st.rerun()
+                    except: pass
+                else:
+                    # DERS BİTİŞİ VE ANALİZ
+                    st.session_state.lesson_active = False 
+                    with st.spinner("Analiz Yapılıyor..."):
+                        analysis_prompt = """
+                        ANALYZE session. OUTPUT ONLY JSON:
+                        {"score": (0-100), "learned_words": ["w1", "w2"], "level_recommendation": "Stay/Up"}
+                        """
+                        msgs = st.session_state.messages + [{"role": "system", "content": analysis_prompt}]
+                        try:
+                            res = client.chat.completions.create(model="gpt-4o", messages=msgs)
+                            content = res.choices[0].message.content
+                            if "```" in content: content = content.split("json")[1].split("```")[0]
+                            report = json.loads(content)
+                            
+                            user_data["lessons_completed"] += 1
+                            if "learned_words" in report: user_data["vocabulary_bank"].extend(report["learned_words"])
+                            
+                            if user_data["next_mode"] == "ASSESSMENT":
+                                rec = report.get("level_recommendation", "A2")
+                                user_data["current_level"] = "B1" if "Up" in rec else "A2"
+                                user_data["next_mode"] = "LESSON"
+                                st.balloons()
+                            elif user_data["lessons_completed"] % 5 == 0:
+                                user_data["next_mode"] = "EXAM"
+                            elif user_data["next_mode"] == "EXAM":
+                                score = report.get("score", 0)
+                                user_data["exam_scores"].append(score)
+                                if score >= 75:
+                                    if user_data["current_level"] == "A2": user_data["current_level"] = "B1"
+                                    elif user_data["current_level"] == "B1": user_data["current_level"] = "B2"
+                                    st.balloons()
+                                user_data["next_mode"] = "LESSON"
+                            else:
+                                user_data["next_mode"] = "LESSON"
+
+                            save_data(user_data)
+                            st.success("✅ İlerleme Kaydedildi.")
+                            st.json(report)
+                        except Exception as e:
+                            st.error(f"Rapor hatası: {e}")
+                        
+                        if st.button("Ana Ekrana Dön"): st.rerun()
+
+        # SES İŞLEME (HATA DÜZELTİLEN YER)
+        if audio:
+            with st.spinner("Dinliyor..."):
+                try:
+                    # --- DÜZELTME BURADA ---
+                    # Dosyayı BytesIO nesnesine çeviriyoruz
+                    audio_bio = io.BytesIO(audio['bytes'])
+                    # Dosya ismini nesnenin kendisine atıyoruz (API böyle istiyor)
+                    audio_bio.name = "audio.webm"
+                    
+                    transcript = client.audio.transcriptions.create(
+                        model="whisper-1", 
+                        file=audio_bio, # Sadece dosyayı veriyoruz, name parametresi ARTIK YOK
+                        language="en"
+                    ).text
+                    
+                    st.session_state.messages.append({"role": "user", "content": transcript})
+                    
+                    with st.spinner("Cevaplıyor..."):
+                        res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
+                        reply = res.choices[0].message.content
+                        st.session_state.messages.append({"role": "assistant", "content": reply})
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Hata detayı: {e}")
+
+else:
+    st.warning("Lütfen API Anahtarını girin.")
