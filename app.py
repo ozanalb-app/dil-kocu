@@ -1,7 +1,7 @@
 import streamlit as st
 from openai import OpenAI
 from streamlit_mic_recorder import mic_recorder
-import streamlit.components.v1 as components
+from gtts import gTTS # YENİ KÜTÜPHANE
 import json
 import os
 import random
@@ -9,7 +9,7 @@ import io
 import time
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Eco Discipline Coach", page_icon="🌱", layout="wide")
+st.set_page_config(page_title="Iron Discipline Coach", page_icon="🛡️", layout="wide")
 
 DATA_FILE = "user_data.json"
 
@@ -19,21 +19,7 @@ TOPIC_POOL = {
     "B2": ["Global Warming", "Remote Work", "AI Ethics", "Cultural Differences", "Education Systems", "Economy"]
 }
 
-# --- 2. BEDAVA SES MOTORU (JavaScript) ---
-def speak(text):
-    # Bu fonksiyon tarayıcının kendi sesini kullanır (BEDAVA)
-    js = f"""
-    <script>
-        window.speechSynthesis.cancel();
-        var msg = new SpeechSynthesisUtterance("{text.replace('"', '').replace("'", "")}");
-        msg.lang = "en-US";
-        msg.rate = 1.0;
-        window.speechSynthesis.speak(msg);
-    </script>
-    """
-    components.html(js, height=0)
-
-# --- 3. VERİ YÖNETİMİ ---
+# --- 2. VERİ YÖNETİMİ ---
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {
@@ -52,7 +38,7 @@ def save_data(data):
 
 user_data = load_data()
 
-# --- 4. DERS BAŞLATICI ---
+# --- 3. DERS BAŞLATICI ---
 def start_lesson_logic(client, level, mode, duration_mins):
     # Konu Seçimi
     if mode == "EXAM":
@@ -98,11 +84,17 @@ def start_lesson_logic(client, level, mode, duration_mins):
         first_res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
         first_msg = first_res.choices[0].message.content
         st.session_state.messages.append({"role": "assistant", "content": first_msg})
-        st.session_state.last_reply_to_speak = first_msg # Sesi kuyruğa at
+        
+        # SES ÜRET (gTTS)
+        tts = gTTS(text=first_msg, lang='en')
+        audio_fp = io.BytesIO()
+        tts.write_to_fp(audio_fp)
+        st.session_state.last_audio_response = audio_fp.getvalue() # Sesi kaydet
+        
     except Exception as e:
         st.error(f"Başlatma hatası: {e}")
 
-# --- 5. ARAYÜZ ---
+# --- 4. ARAYÜZ ---
 with st.sidebar:
     st.title("🛡️ Öğrenci Kimliği")
     if "OPENAI_API_KEY" in st.secrets:
@@ -143,7 +135,7 @@ with st.sidebar:
             save_data({"current_level": "A2", "lessons_completed": 0, "exam_scores": [], "vocabulary_bank": [], "next_mode": "ASSESSMENT"})
             st.rerun()
 
-# --- 6. ANA AKIŞ ---
+# --- 5. ANA AKIŞ ---
 if api_key:
     client = OpenAI(api_key=api_key)
     st.title("🌱 Eco Discipline Language Core")
@@ -169,10 +161,11 @@ if api_key:
                 with st.chat_message(msg["role"], avatar="🤖" if msg["role"]=="assistant" else "👤"):
                     st.write(msg["content"])
         
-        # SESLENDİRME (Burada Bedava Fonksiyon Çağrılıyor)
-        if "last_reply_to_speak" in st.session_state and st.session_state.last_reply_to_speak:
-            speak(st.session_state.last_reply_to_speak)
-            st.session_state.last_reply_to_speak = None # Bir kere oku ve sus
+        # SESLENDİRME (MP3 ÇALAR)
+        if "last_audio_response" in st.session_state and st.session_state.last_audio_response:
+            # Autoplay=True ile otomatik çalmayı dener
+            st.audio(st.session_state.last_audio_response, format="audio/mp3", autoplay=True)
+            # Not: Sesi sıfırlamıyoruz (None yapmıyoruz) ki player ekranda kalsın
 
         st.write("---")
         c_mic, c_fin = st.columns([1, 4])
@@ -198,7 +191,6 @@ if api_key:
                             user_data["lessons_completed"] += 1
                             if "learned_words" in rep: user_data["vocabulary_bank"].extend(rep["learned_words"])
                             
-                            # Mod Geçişleri
                             if user_data["next_mode"] == "ASSESSMENT":
                                 user_data["current_level"] = "B1" if "Up" in rep.get("level_recommendation","") else "A2"
                                 user_data["next_mode"] = "LESSON"
@@ -217,14 +209,14 @@ if api_key:
                         except: st.error("Analiz hatası.")
                         if st.button("Devam"): st.rerun()
 
-        # SES İŞLEME VE DÖNGÜ KORUMASI
+        # SES İŞLEME
         if audio:
             if "last_audio_bytes" not in st.session_state or audio['bytes'] != st.session_state.last_audio_bytes:
                 st.session_state.last_audio_bytes = audio['bytes']
                 
                 with st.spinner("Dinliyor..."):
                     try:
-                        # 1. Whisper (Hızlı ve Ucuz)
+                        # 1. Whisper
                         audio_bio = io.BytesIO(audio['bytes'])
                         audio_bio.name = "audio.webm"
                         transcript = client.audio.transcriptions.create(
@@ -232,13 +224,17 @@ if api_key:
                         ).text
                         st.session_state.messages.append({"role": "user", "content": transcript})
                         
-                        # 2. GPT (Zeki)
+                        # 2. GPT
                         res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
                         reply = res.choices[0].message.content
                         st.session_state.messages.append({"role": "assistant", "content": reply})
                         
-                        # Sesi kuyruğa atıp sayfayı yeniliyoruz ki speak() çalışsın
-                        st.session_state.last_reply_to_speak = reply 
+                        # 3. gTTS (Bedava Ses Oluşturucu)
+                        tts = gTTS(text=reply, lang='en')
+                        audio_fp = io.BytesIO()
+                        tts.write_to_fp(audio_fp)
+                        st.session_state.last_audio_response = audio_fp.getvalue()
+                        
                         st.rerun()
                         
                     except Exception as e:
