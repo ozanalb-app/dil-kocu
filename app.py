@@ -1,17 +1,17 @@
 import streamlit as st
 from openai import OpenAI
 from streamlit_mic_recorder import mic_recorder
+import streamlit.components.v1 as components
 import io
 
 # --- SAYFA AYARLARI ---
-st.set_page_config(page_title="Pro Dil Koçu", page_icon="🎧")
+st.set_page_config(page_title="Dil Koçu (Eco Mod)", page_icon="🌱")
 
-st.title("🎧 Pro Dil Koçu")
-st.markdown("Whisper (Kulak) + GPT-4o (Beyin) + Onyx (Ses)")
+st.title("🌱 Dil Koçu (Ekonomik Mod)")
+st.markdown("**Kulak:** Whisper (Mükemmel) | **Ses:** Tarayıcı (Bedava)")
 
 # --- AYARLAR ---
 with st.sidebar:
-    # Eğer secrets'ta şifre varsa onu al, yoksa kutucuk göster
     if "OPENAI_API_KEY" in st.secrets:
         api_key = st.secrets["OPENAI_API_KEY"]
     else:
@@ -20,6 +20,21 @@ with st.sidebar:
     dil = st.radio("Dil Seçimi", ["İngilizce", "Türkçe"])
     lang_code = "en" if dil == "İngilizce" else "tr"
 
+# --- BEDAVA SES MOTORU (JS) ---
+def speak(text, lang):
+    # JavaScript ile tarayıcıyı konuşturuyoruz (Bedava)
+    js = f"""
+    <script>
+        window.speechSynthesis.cancel();
+        var msg = new SpeechSynthesisUtterance("{text.replace('"', '')}");
+        msg.lang = "{'en-US' if lang == 'en' else 'tr-TR'}";
+        // Ses hızını ayarlayabilirsin (1.0 normal, 0.9 biraz yavaş)
+        msg.rate = 0.9; 
+        window.speechSynthesis.speak(msg);
+    </script>
+    """
+    components.html(js, height=0)
+
 # --- ANA AKIŞ ---
 if api_key:
     client = OpenAI(api_key=api_key)
@@ -27,25 +42,24 @@ if api_key:
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # SOHBETİ GÖSTER
+    # Sohbeti Göster
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    # --- MİKROFON ---
+    # --- MİKROFON (WHISPER KALİTESİ) ---
     st.write("---")
     st.write("Mikrofona basın, konuşun ve durdurun:")
     
-    # Sesi al
     audio = mic_recorder(
-        start_prompt="🎤 Kaydı Başlat",
+        start_prompt="🔴 Kaydı Başlat",
         stop_prompt="⏹️ Bitir ve Gönder",
         key="recorder"
     )
 
     if audio:
-        # 1. WHISPER (Sesi Yazıya Çevir)
-        with st.spinner("Sesiniz analiz ediliyor..."):
+        # 1. WHISPER (Seni Mükemmel Anlar - Ücretli ama Ucuz)
+        with st.spinner("Whisper ile dinleniyor..."):
             audio_bio = io.BytesIO(audio['bytes'])
             audio_bio.name = "audio.webm"
             
@@ -56,15 +70,14 @@ if api_key:
             )
             user_text = transcript.text
 
-        # Yeni bir şey söylendiyse işle
+        # Yeni mesaj varsa işle
         if not st.session_state.messages or st.session_state.messages[-1]["content"] != user_text:
             
-            # Kullanıcı mesajını ekrana yaz
             st.session_state.messages.append({"role": "user", "content": user_text})
             with st.chat_message("user"):
                 st.write(user_text)
 
-            # 2. GPT (Cevap Üret)
+            # 2. GPT (Cevap Verir - Ücretli ama Ucuz)
             with st.chat_message("assistant"):
                 with st.spinner("Cevap hazırlanıyor..."):
                     system_msg = f"Sen {dil} öğreten yardımsever bir öğretmensin. Kısa ve net cevap ver."
@@ -74,20 +87,12 @@ if api_key:
                         messages=[{"role": "system", "content": system_msg}] + st.session_state.messages
                     )
                     reply = response.choices[0].message.content
+                    
                     st.write(reply)
                     st.session_state.messages.append({"role": "assistant", "content": reply})
-
-                    # 3. TTS (Sesi Oku - MP3 Olarak)
-                    # OpenAI'ın kendi ses motorunu kullanıyoruz.
-                    # Ses seçenekleri: alloy, echo, fable, onyx, nova, shimmer
-                    tts_response = client.audio.speech.create(
-                        model="tts-1",
-                        voice="alloy",
-                        input=reply
-                    )
                     
-                    # Ekrana bir ses oynatıcı koy ve otomatik başlat
-                    st.audio(tts_response.content, format="audio/mp3", autoplay=True)
+                    # 3. TARAYICI SESİ (Bedava)
+                    speak(reply, lang_code)
 
 else:
     st.warning("Lütfen API anahtarını girin.")
