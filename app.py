@@ -13,104 +13,45 @@ import re
 st.set_page_config(page_title="Pınar's Friend", page_icon="🎤", layout="wide")
 DATA_FILE = "user_data.json"
 
-# BURASI GENİŞLETEBİLECEĞİN KONU LİSTESİDİR
+# --- KONU HAVUZU ---
 TOPIC_POOL = {
     "A2": [
-  "My Daily Morning Routine",
-  "What I Do in the Evening",
-  "Ordering Food at a Restaurant",
-  "Asking for Directions in a City",
-  "Shopping for Clothes",
-  "Buying Food at the Supermarket",
-  "My Favorite Food",
-  "My Favorite Movie",
-  "My Favorite Music",
-  "My Best Friend",
-  "My Family",
-  "My Job or Daily Responsibilities",
-  "My Hobbies and Free Time",
-  "Plans for Next Weekend",
-  "My Favorite Place in My City",
-  "Talking About the Weather",
-  "My House or Apartment",
-  "A Typical Day at Home",
-  "Going to the Doctor",
-  "Taking Public Transport",
-  "Ordering Coffee at a Café",
-  "Talking About My Pet",
-  "My Favorite Holiday",
-  "My Favorite School Subject",
-  "Talking About My Childhood",
-  "A Simple Phone Call",
-  "Making an Appointment",
-  "Talking About Today",
-  "What I Like and Don’t Like",
-  "Daily Problems at Home"
-],
+        "My Daily Morning Routine", "What I Do in the Evening", "Ordering Food at a Restaurant",
+        "Asking for Directions in a City", "Shopping for Clothes", "Buying Food at the Supermarket",
+        "My Favorite Food", "My Favorite Movie", "My Favorite Music", "My Best Friend", "My Family",
+        "My Job or Daily Responsibilities", "My Hobbies and Free Time", "Plans for Next Weekend",
+        "My Favorite Place in My City", "Talking About the Weather", "My House or Apartment",
+        "A Typical Day at Home", "Going to the Doctor", "Taking Public Transport",
+        "Ordering Coffee at a Café", "Talking About My Pet", "My Favorite Holiday",
+        "My Favorite School Subject", "Talking About My Childhood", "A Simple Phone Call",
+        "Making an Appointment", "Talking About Today", "What I Like and Don’t Like",
+        "Daily Problems at Home"
+    ],
     "B1": [
-  "Describing a Past Holiday",
-  "A Job Interview Simulation",
-  "Solving a Problem at a Hotel",
-  "Talking About My Workday",
-  "Healthy Eating Habits",
-  "My Hobbies and Why I Like Them",
-  "Social Media: Good or Bad?",
-  "Advice for a Tourist",
-  "Learning a New Skill",
-  "Technology in Daily Life",
-  "A Problem with Online Shopping",
-  "Talking About My Education",
-  "Comparing Life Now and in the Past",
-  "Living in a Foreign Country",
-  "Describing a Difficult Day",
-  "Making a Complaint Politely",
-  "Giving Advice to a Friend",
-  "Talking About Future Plans",
-  "Using Technology at Work",
-  "A Problem with a Neighbor",
-  "Describing a Personal Achievement",
-  "Work–Life Balance",
-  "Talking About Health Problems",
-  "A Problem at the Airport",
-  "Discussing Weekend Activities",
-  "Describing a Book or Series",
-  "Advantages and Disadvantages of City Life",
-  "Talking About Rules and Responsibilities",
-  "Handling a Small Conflict",
-  "My Opinion About Online Education"
-],
+        "Describing a Past Holiday", "A Job Interview Simulation", "Solving a Problem at a Hotel",
+        "Talking About My Workday", "Healthy Eating Habits", "My Hobbies and Why I Like Them",
+        "Social Media: Good or Bad?", "Advice for a Tourist", "Learning a New Skill",
+        "Technology in Daily Life", "A Problem with Online Shopping", "Talking About My Education",
+        "Comparing Life Now and in the Past", "Living in a Foreign Country", "Describing a Difficult Day",
+        "Making a Complaint Politely", "Giving Advice to a Friend", "Talking About Future Plans",
+        "Using Technology at Work", "A Problem with a Neighbor", "Describing a Personal Achievement",
+        "Work–Life Balance", "Talking About Health Problems", "A Problem at the Airport",
+        "Discussing Weekend Activities", "Describing a Book or Series", "Advantages and Disadvantages of City Life",
+        "Talking About Rules and Responsibilities", "Handling a Small Conflict", "My Opinion About Online Education"
+    ],
     "B2": [
-  "The Pros and Cons of Remote Work",
-  "Climate Change and Global Warming",
-  "Artificial Intelligence and Ethics",
-  "Cultural Differences in Business",
-  "Education System Reform",
-  "Economic Challenges in Modern Society",
-  "The Impact of Globalization",
-  "Technology and Privacy",
-  "Workplace Communication Problems",
-  "Leadership Styles in Organizations",
-  "Gender Equality at Work",
-  "The Future of Education",
-  "Social Media and Mental Health",
-  "The Role of Governments in Society",
-  "Balancing Career and Family Life",
-  "Advantages and Risks of Artificial Intelligence",
-  "Cultural Adaptation in a New Country",
-  "Ethical Problems in Technology",
-  "Remote Work vs Office Work",
-  "The Importance of Lifelong Learning",
-  "Consumerism and Modern Life",
-  "Environmental Responsibility of Companies",
-  "Freedom of Speech",
-  "Global Economic Inequality",
-  "Stress and Burnout at Work",
-  "Decision Making Under Pressure",
-  "Immigration and Integration",
-  "The Role of Technology in Education",
-  "Crisis Management",
-  "The Future of Work"
-]
+        "The Pros and Cons of Remote Work", "Climate Change and Global Warming", "Artificial Intelligence and Ethics",
+        "Cultural Differences in Business", "Education System Reform", "Economic Challenges in Modern Society",
+        "The Impact of Globalization", "Technology and Privacy", "Workplace Communication Problems",
+        "Leadership Styles in Organizations", "Gender Equality at Work", "The Future of Education",
+        "Social Media and Mental Health", "The Role of Governments in Society", "Balancing Career and Family Life",
+        "Advantages and Risks of Artificial Intelligence", "Cultural Adaptation in a New Country",
+        "Ethical Problems in Technology", "Remote Work vs Office Work", "The Importance of Lifelong Learning",
+        "Consumerism and Modern Life", "Environmental Responsibility of Companies", "Freedom of Speech",
+        "Global Economic Inequality", "Stress and Burnout at Work", "Decision Making Under Pressure",
+        "Immigration and Integration", "The Role of Technology in Education", "Crisis Management",
+        "The Future of Work"
+    ]
 }
 
 # --- 2. YARDIMCI FONKSİYONLAR ---
@@ -139,86 +80,73 @@ user_data = load_data()
 def start_lesson_logic(client, level, mode, target_speaking_seconds):
     if mode == "EXAM":
         topic = random.choice(TOPIC_POOL[level])
-        # "Short responses" emri burada
         system_role = f"ACT AS: Strict Examiner. LEVEL: {level}. TOPIC: {topic}. GOAL: Test user. RESPONSE STYLE: Short, direct questions. No long explanations."
     elif mode == "ASSESSMENT":
         topic = "Level Assessment"
         system_role = "ACT AS: Examiner. GOAL: Determine level. Ask 3 questions. RESPONSE STYLE: Very short."
     else:
         topic = random.choice(TOPIC_POOL.get(level, ["General"]))
-        # Normal derste de kısa cevap emri
         system_role = f"ACT AS: Helpful Coach. LEVEL: {level}. TOPIC: {topic}. RESPONSE STYLE: Keep answers UNDER 2 SENTENCES. Ask ONE question at a time."
 
     target_vocab = []
-    # GENİŞLETEBİLECEĞİN KELİME LİSTESİ (FALLBACK)
+    
     if mode == "LESSON":
-    if level == "A2":
-        target_vocab = [
-            "happy", "sad", "angry", "tired", "hungry",
-            "friend", "family", "child", "people", "person",
-            "home", "house", "room", "kitchen", "bedroom",
-            "work", "job", "school", "teacher", "student",
-            "morning", "afternoon", "evening", "night", "today",
-            "yesterday", "tomorrow", "weekend", "holiday", "time",
-            "food", "breakfast", "lunch", "dinner", "coffee",
-            "water", "restaurant", "shop", "market", "money",
-            "travel", "bus", "train", "car", "walk",
-            "city", "street", "park", "place", "country",
-            "weather", "sunny", "rainy", "cold", "hot",
-            "music", "movie", "book", "game", "hobby",
-            "like", "love", "want", "need", "have",
-            "go", "come", "make", "do", "see",
-            "good", "bad", "easy", "difficult", "important",
-            "help", "problem", "question", "answer", "idea",
-            "everyday", "sometimes", "always", "usually", "never"
-        ]
-
-    elif level == "B1":
-        target_vocab = [
-            "opinion", "experience", "suggest", "prefer", "describe",
-            "explain", "compare", "decide", "choose", "discuss",
-            "problem", "solution", "reason", "result", "example",
-            "recently", "usually", "generally", "sometimes", "currently",
-            "challenge", "opportunity", "improve", "develop", "change",
-            "habit", "routine", "lifestyle", "health", "balance",
-            "education", "career", "interview", "responsibility", "skill",
-            "technology", "internet", "application", "online", "digital",
-            "travel", "culture", "difference", "similarity", "tradition",
-            "environment", "pollution", "recycle", "energy", "nature",
-            "communication", "relationship", "conflict", "agreement", "support",
-            "advantage", "disadvantage", "benefit", "risk", "effect",
-            "future", "plan", "goal", "decision", "expectation",
-            "feel", "believe", "think", "agree", "disagree",
-            "manage", "organize", "handle", "solve", "prepare",
-            "situation", "experience", "opinion", "example", "point"
-        ]
-
-    else:  # B2
-        target_vocab = [
-            "perspective", "viewpoint", "attitude", "belief", "assumption",
-            "imply", "indicate", "suggest", "demonstrate", "highlight",
-            "consequence", "outcome", "impact", "effect", "implication",
-            "debate", "argument", "discussion", "controversy", "issue",
-            "theory", "concept", "principle", "framework", "approach",
-            "significant", "crucial", "essential", "relevant", "substantial",
-            "analyze", "evaluate", "assess", "examine", "interpret",
-            "compare", "contrast", "justify", "support", "challenge",
-            "trend", "pattern", "development", "progress", "shift",
-            "society", "economy", "politics", "culture", "globalization",
-            "ethics", "responsibility", "accountability", "fairness", "equality",
-            "technology", "innovation", "automation", "artificial", "digitalization",
-            "environment", "sustainability", "climate", "resources", "consumption",
-            "workplace", "leadership", "management", "strategy", "decision-making",
-            "pressure", "stress", "burnout", "well-being", "motivation",
-            "long-term", "short-term", "trade-off", "priority", "objective",
-            "adapt", "adjust", "cope", "respond", "anticipate",
-            "complex", "abstract", "practical", "theoretical", "systematic"
-        ]
-
+        full_vocab_list = []
+        if level == "A2":
+            full_vocab_list = [
+                "happy", "sad", "angry", "tired", "hungry", "friend", "family", "child", "people", "person",
+                "home", "house", "room", "kitchen", "bedroom", "work", "job", "school", "teacher", "student",
+                "morning", "afternoon", "evening", "night", "today", "yesterday", "tomorrow", "weekend", "holiday", "time",
+                "food", "breakfast", "lunch", "dinner", "coffee", "water", "restaurant", "shop", "market", "money",
+                "travel", "bus", "train", "car", "walk", "city", "street", "park", "place", "country",
+                "weather", "sunny", "rainy", "cold", "hot", "music", "movie", "book", "game", "hobby",
+                "like", "love", "want", "need", "have", "go", "come", "make", "do", "see",
+                "good", "bad", "easy", "difficult", "important", "help", "problem", "question", "answer", "idea",
+                "everyday", "sometimes", "always", "usually", "never"
+            ]
+        elif level == "B1":
+            full_vocab_list = [
+                "opinion", "experience", "suggest", "prefer", "describe", "explain", "compare", "decide", "choose", "discuss",
+                "problem", "solution", "reason", "result", "example", "recently", "usually", "generally", "sometimes", "currently",
+                "challenge", "opportunity", "improve", "develop", "change", "habit", "routine", "lifestyle", "health", "balance",
+                "education", "career", "interview", "responsibility", "skill", "technology", "internet", "application", "online", "digital",
+                "travel", "culture", "difference", "similarity", "tradition", "environment", "pollution", "recycle", "energy", "nature",
+                "communication", "relationship", "conflict", "agreement", "support", "advantage", "disadvantage", "benefit", "risk", "effect",
+                "future", "plan", "goal", "decision", "expectation", "feel", "believe", "think", "agree", "disagree",
+                "manage", "organize", "handle", "solve", "prepare", "situation", "experience", "opinion", "example", "point"
+            ]
+        else: # B2
+            full_vocab_list = [
+                "perspective", "viewpoint", "attitude", "belief", "assumption", "imply", "indicate", "suggest", "demonstrate", "highlight",
+                "consequence", "outcome", "impact", "effect", "implication", "debate", "argument", "discussion", "controversy", "issue",
+                "theory", "concept", "principle", "framework", "approach", "significant", "crucial", "essential", "relevant", "substantial",
+                "analyze", "evaluate", "assess", "examine", "interpret", "compare", "contrast", "justify", "support", "challenge",
+                "trend", "pattern", "development", "progress", "shift", "society", "economy", "politics", "culture", "globalization",
+                "ethics", "responsibility", "accountability", "fairness", "equality", "technology", "innovation", "automation", "artificial", "digitalization",
+                "environment", "sustainability", "climate", "resources", "consumption", "workplace", "leadership", "management", "strategy", "decision-making",
+                "pressure", "stress", "burnout", "well-being", "motivation", "long-term", "short-term", "trade-off", "priority", "objective",
+                "adapt", "adjust", "cope", "respond", "anticipate", "complex", "abstract", "practical", "theoretical", "systematic"
+            ]
+        
+        # --- 🔥 AKILLI FİLTRELEME (Smart Filter) ---
+        # 1. Daha önce öğrenilenleri (user_data["vocabulary_bank"]) al
+        learned_set = set(user_data.get("vocabulary_bank", []))
+        
+        # 2. Tam listeden, öğrenilenleri çıkar -> Geriye "Bilinmeyenler" kalsın
+        unknown_words = [w for w in full_vocab_list if w not in learned_set]
+        
+        # 3. Eğer bilinmeyen kelime sayısı 5'ten azsa (neredeyse hepsini öğrendiyse),
+        #    mecburen tüm listeyi tekrar aç (sıfırlamak gibi).
+        #    Değilse, sadece bilinmeyenlerden seç.
+        pool_to_select_from = unknown_words if len(unknown_words) >= 5 else full_vocab_list
+        
+        # 4. Rastgele 5 tane seç
+        if pool_to_select_from:
+            target_vocab = random.sample(pool_to_select_from, 5)
 
     st.session_state.lesson_active = True
-    st.session_state.accumulated_speaking_time = 0.0 # Sadece senin konuştuğun süre
-    st.session_state.target_speaking_seconds = target_speaking_seconds # Hedef süre
+    st.session_state.accumulated_speaking_time = 0.0 
+    st.session_state.target_speaking_seconds = target_speaking_seconds
     st.session_state.target_vocab = target_vocab
     st.session_state.topic = topic
     st.session_state.last_audio_bytes = None
@@ -240,7 +168,7 @@ def start_lesson_logic(client, level, mode, target_speaking_seconds):
 
 # --- 4. ARAYÜZ ---
 with st.sidebar:
-    st.title("🎤 Konuşma Odaklı Koç")
+    st.title("🎤 Pınar's Friend")
     if "OPENAI_API_KEY" in st.secrets:
         api_key = st.secrets["OPENAI_API_KEY"]
     else:
@@ -259,11 +187,10 @@ with st.sidebar:
         if st.session_state.target_vocab:
             st.caption(f"**Hedefler:** {', '.join(st.session_state.target_vocab)}")
             
-        # SÜRE HESABI (YENİ MANTIK)
+        # SÜRE HESABI
         current = st.session_state.accumulated_speaking_time
         target = st.session_state.target_speaking_seconds
         
-        # İlerleme Çubuğu
         progress = min(current / target, 1.0)
         st.progress(progress, text=f"Konuşma Süren: {int(current)} / {int(target)} saniye")
         
@@ -284,9 +211,8 @@ if api_key:
 
     if not st.session_state.get("lesson_active", False):
         st.markdown(f"### Merhaba! Mod: **{user_data['next_mode']}**")
-        st.markdown("*Sadece senin konuştuğun süre sayılır. Düşünme ve dinleme süresi sayılmaz.*")
+        st.markdown("*Sadece senin konuştuğun süre sayılır.*")
         
-        # Slider artık DAKİKA değil "Net Konuşma Saniyesi" olarak ayarlı
         target_sec = st.slider("Hedef Konuşma Süresi (Saniye)", 30, 300, 60, step=30)
         st.caption(f"Not: {target_sec} saniye net konuşma, yaklaşık {int(target_sec/0.6)} kelime demektir.")
         
@@ -331,7 +257,11 @@ if api_key:
                             if not rep: rep = {"score": 80, "level_recommendation": "Stay"}
 
                             user_data["lessons_completed"] += 1
-                            if "learned_words" in rep: user_data["vocabulary_bank"].extend(rep["learned_words"])
+                            # Analizden gelen yeni öğrenilenleri kaydediyoruz
+                            # Bu sayede bir sonraki derste bunlar filtrelenecek!
+                            if "learned_words" in rep: 
+                                # Sadece hedef kelimeleri değil, raporda gelenleri ekliyoruz
+                                user_data["vocabulary_bank"].extend(rep["learned_words"])
                             
                             if user_data["next_mode"] == "ASSESSMENT":
                                 rec = rep.get("level_recommendation", "A2")
@@ -372,14 +302,9 @@ if api_key:
                             prompt=f"Lesson topic: {st.session_state.topic}"
                         ).text
                         
-                        # --- 🔥 YENİ SÜRE HESAPLAMA MANTIĞI ---
-                        # Kelime sayısına göre tahmini konuşma süresi ekle
-                        # Ortalama bir insan saniyede 2-3 kelime konuşur. 
-                        # Biz biraz cömert davranıp kelime başına 0.6 saniye verelim.
                         word_count = len(transcript.split())
                         estimated_seconds = word_count * 0.7 
                         st.session_state.accumulated_speaking_time += estimated_seconds
-                        # -------------------------------------
                         
                         st.session_state.messages.append({"role": "user", "content": transcript})
                         
