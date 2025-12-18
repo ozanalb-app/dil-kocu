@@ -39,7 +39,7 @@ user_data = load_data()
 
 # --- 3. DERS BAŞLATICI ---
 def start_lesson_logic(client, level, mode, duration_mins):
-    # 1. Konu ve Rol Seçimi
+    # 1. Konu Seçimi
     if mode == "EXAM":
         topic = random.choice(TOPIC_POOL[level])
         system_role = f"ACT AS: Strict Examiner. LEVEL: {level}. TOPIC: {topic}. GOAL: Test the user. NO help. Do not correct errors, just evaluate."
@@ -50,7 +50,7 @@ def start_lesson_logic(client, level, mode, duration_mins):
         topic = random.choice(TOPIC_POOL.get(level, ["General Conversation"]))
         system_role = f"ACT AS: Helpful Coach. LEVEL: {level}. TOPIC: {topic}. Keep conversation going. Correct major mistakes kindly."
 
-    # 2. Hedef Kelimeleri Belirle
+    # 2. Hedef Kelimeler
     target_vocab = []
     if mode == "LESSON":
         vocab_prompt = f"Generate 5 useful English words (JSON list of strings) related to '{topic}' for {level} level learner. Output ONLY valid JSON: ['word1', 'word2'...]"
@@ -69,22 +69,28 @@ def start_lesson_logic(client, level, mode, duration_mins):
         except:
             target_vocab = ["opinion", "suggest", "experience", "prefer", "describe"]
 
-    # 3. Oturumu Başlat (Değişkenleri Kaydet)
+    # 3. Oturumu Başlat
     st.session_state.lesson_active = True
     st.session_state.start_time = time.time()
-    st.session_state.target_duration = duration_mins * 60 # Saniyeye çevir
+    st.session_state.target_duration = duration_mins * 60
     st.session_state.target_vocab = target_vocab
     st.session_state.topic = topic
+    st.session_state.last_audio_bytes = None # Döngü engellemek için
     
     final_prompt = f"{system_role}\nCONTEXT: The student must try to use these words: {', '.join(target_vocab)}.\nIf they use one, PRAISE them briefly inside parentheses."
     
     st.session_state.messages = [{"role": "system", "content": final_prompt}]
     
-    # İlk Mesaj
+    # İlk Mesajı Al
     try:
         first_res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
         first_msg = first_res.choices[0].message.content
         st.session_state.messages.append({"role": "assistant", "content": first_msg})
+        
+        # İlk mesajı seslendir
+        tts = client.audio.speech.create(model="tts-1", voice="onyx", input=first_msg)
+        st.session_state.last_audio_response = tts.content # Sesi kaydet
+        
     except Exception as e:
         st.error(f"Başlatma hatası: {e}")
 
@@ -128,7 +134,6 @@ with st.sidebar:
             for word in st.session_state.target_vocab:
                 st.markdown(f"- `{word}`")
         
-        # ZAMAN SAYACI
         elapsed = int(time.time() - st.session_state.start_time)
         target = st.session_state.target_duration
         remaining = target - elapsed
@@ -152,19 +157,16 @@ if api_key:
 
     st.title("⚔️ Iron Discipline Language Core")
 
-    # A) DERS BAŞLAMADIYSA -> AYARLAR VE BAŞLAT
+    # A) DERS BAŞLAMADIYSA
     if not st.session_state.get("lesson_active", False):
         st.markdown(f"### Hoş geldin! 👋")
         
         col_info, col_set = st.columns([2, 1])
-        
         with col_info:
             st.info(f"📍 **Seviye:** {user_data['current_level']} | **Mod:** {user_data['next_mode']}")
-            st.write("Ders süresini seç ve başla. Süre dolmadan çıkış yapamazsın!")
-
+            st.write("Ders süresini seç ve başla.")
         with col_set:
-            # SÜRE AYARI (SLIDER)
-            selected_duration = st.slider("⏳ Ders Süresi (Dakika)", min_value=1, max_value=30, value=10, step=1)
+            selected_duration = st.slider("⏳ Süre (Dk)", 1, 30, 10, 1)
         
         st.write("")
         btn_label = "🚀 DERSİ BAŞLAT" if user_data["next_mode"] != "EXAM" else "🔥 SINAVI BAŞLAT"
@@ -174,7 +176,7 @@ if api_key:
                 start_lesson_logic(client, user_data["current_level"], user_data["next_mode"], selected_duration)
                 st.rerun()
 
-    # B) DERS AKTİFSE -> SOHBET
+    # B) DERS AKTİFSE
     else:
         chat_container = st.container()
         with chat_container:
@@ -183,11 +185,17 @@ if api_key:
                     avatar = "🤖" if msg["role"] == "assistant" else "👤"
                     with st.chat_message(msg["role"], avatar=avatar):
                         st.write(msg["content"])
+            
+            # Son gelen sesli yanıtı oynat (Varsa)
+            if "last_audio_response" in st.session_state and st.session_state.last_audio_response:
+                st.audio(st.session_state.last_audio_response, format="audio/mp3", autoplay=True)
+                st.session_state.last_audio_response = None # Tekrar tekrar çalmasın
 
         st.write("---")
         col_mic, col_finish = st.columns([1, 4])
         
         with col_mic:
+            # MİKROFON
             audio = mic_recorder(start_prompt="🎤 KONUŞ", stop_prompt="⏹️ GÖNDER", key="recorder")
         
         with col_finish:
@@ -195,23 +203,13 @@ if api_key:
             target_sec = st.session_state.target_duration
             
             if st.button("🏁 DERSİ BİTİR / FINISH", use_container_width=True):
-                # ZAMAN KİLİDİ
+                # ÇIKIŞ KONTROLÜ
                 if user_data["next_mode"] != "ASSESSMENT" and elapsed_sec < target_sec:
                     missing = target_sec - elapsed_sec
-                    st.toast("🚫 ÇIKIŞ YASAK!", icon="🔒")
-                    st.error(f"Disiplin! Daha {int(missing // 60)} dk {int(missing % 60)} sn konuşmalısın.")
-                    
-                    st.session_state.messages.append({
-                        "role": "system", 
-                        "content": "User tried to quit early. Refuse strictly and ask a provocative question."
-                    })
-                    try:
-                        res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
-                        st.session_state.messages.append({"role": "assistant", "content": res.choices[0].message.content})
-                        st.rerun()
-                    except: pass
+                    st.toast("🚫 SÜRE DOLMADI!", icon="🔒")
+                    st.error(f"Daha {int(missing // 60)} dk {int(missing % 60)} sn konuşmalısın.")
                 else:
-                    # DERS BİTİŞİ VE ANALİZ
+                    # ANALİZ VE KAYIT
                     st.session_state.lesson_active = False 
                     with st.spinner("Analiz Yapılıyor..."):
                         analysis_prompt = """
@@ -228,6 +226,7 @@ if api_key:
                             user_data["lessons_completed"] += 1
                             if "learned_words" in report: user_data["vocabulary_bank"].extend(report["learned_words"])
                             
+                            # Mod Değişimi
                             if user_data["next_mode"] == "ASSESSMENT":
                                 rec = report.get("level_recommendation", "A2")
                                 user_data["current_level"] = "B1" if "Up" in rec else "A2"
@@ -247,38 +246,47 @@ if api_key:
                                 user_data["next_mode"] = "LESSON"
 
                             save_data(user_data)
-                            st.success("✅ İlerleme Kaydedildi.")
+                            st.success("✅ Ders Bitti! Rapor kaydedildi.")
                             st.json(report)
-                        except Exception as e:
-                            st.error(f"Rapor hatası: {e}")
+                        except:
+                            st.error("Analiz kaydedilemedi ama ders sayıldı.")
                         
                         if st.button("Ana Ekrana Dön"): st.rerun()
 
-        # SES İŞLEME (HATA DÜZELTİLEN YER)
+        # SES İŞLEME (DÜZELTİLDİ: TTS EKLENDİ + DÖNGÜ KORUMASI)
         if audio:
-            with st.spinner("Dinliyor..."):
-                try:
-                    # --- DÜZELTME BURADA ---
-                    # Dosyayı BytesIO nesnesine çeviriyoruz
-                    audio_bio = io.BytesIO(audio['bytes'])
-                    # Dosya ismini nesnenin kendisine atıyoruz (API böyle istiyor)
-                    audio_bio.name = "audio.webm"
-                    
-                    transcript = client.audio.transcriptions.create(
-                        model="whisper-1", 
-                        file=audio_bio, # Sadece dosyayı veriyoruz, name parametresi ARTIK YOK
-                        language="en"
-                    ).text
-                    
-                    st.session_state.messages.append({"role": "user", "content": transcript})
-                    
-                    with st.spinner("Cevaplıyor..."):
+            # Döngü Koruması: Eğer gelen ses verisi bir öncekiyle birebir aynıysa işlem yapma
+            if "last_audio_bytes" not in st.session_state or audio['bytes'] != st.session_state.last_audio_bytes:
+                st.session_state.last_audio_bytes = audio['bytes'] # Yeni sesi kaydet
+                
+                with st.spinner("Dinliyor & Cevap Hazırlıyor..."):
+                    try:
+                        # 1. WHISPER (STT)
+                        audio_bio = io.BytesIO(audio['bytes'])
+                        audio_bio.name = "audio.webm"
+                        transcript = client.audio.transcriptions.create(
+                            model="whisper-1", file=audio_bio, language="en"
+                        ).text
+                        
+                        st.session_state.messages.append({"role": "user", "content": transcript})
+                        
+                        # 2. GPT (LLM)
                         res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
                         reply = res.choices[0].message.content
                         st.session_state.messages.append({"role": "assistant", "content": reply})
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"Hata detayı: {e}")
-
+                        
+                        # 3. TTS (SES - GERİ GELDİ!)
+                        tts_response = client.audio.speech.create(
+                            model="tts-1",
+                            voice="onyx", # Erkek sesi (onyx). Kadın istersen "nova" yap.
+                            input=reply
+                        )
+                        # Sesi hemen oynatmak yerine değişkene atıp rerun yapıyoruz
+                        st.session_state.last_audio_response = tts_response.content
+                        
+                        st.rerun() # Ekranı yenile ki mesaj ve ses görünsün
+                        
+                    except Exception as e:
+                        st.error(f"Hata: {e}")
 else:
     st.warning("Lütfen API Anahtarını girin.")
