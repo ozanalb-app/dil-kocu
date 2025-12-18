@@ -10,13 +10,16 @@ import time
 import re
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v5.1", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v5.2", page_icon="🛡️", layout="wide")
 DATA_FILE = "user_data.json"
 
-# --- HALÜSİNASYON FİLTRESİ ---
+# --- 🚨 GENİŞLETİLMİŞ HALÜSİNASYON LİSTESİ (KARA LİSTE) ---
+# Whisper'ın sessizlik anında uydurduğu bilinen cümleler
 BANNED_PHRASES = [
     "Hi, how are you?", "Good to see you", "Thank you", "Thanks for watching", 
-    "Copyright", "Subscribe", "Amara.org", "Watch this video", "You"
+    "Copyright", "Subscribe", "Amara.org", "Watch this video", "You", 
+    "I could not think of anything", "I was so hungry", "I don't know", 
+    "Bye", "The end", "Silence", "Audio", "Music"
 ]
 
 # --- KONU HAVUZU ---
@@ -107,6 +110,7 @@ def start_lesson_logic(client, level, mode, target_speaking_seconds):
     review_vocab = []
     
     if mode == "LESSON":
+        # Örnek havuzlar (Normalde burası senin uzun listelerin olacak)
         full_vocab_list = ["happy", "travel", "friend", "time", "weather", "family", "weekend", "food", "city", "music"]
         if level == "B1": full_vocab_list = ["opinion", "suggest", "experience", "prefer", "describe", "recently", "challenge", "career", "habit", "culture"]
         elif level == "B2": full_vocab_list = ["perspective", "imply", "consequence", "debate", "theory", "significant", "approach", "justify", "complex", "adapt"]
@@ -170,12 +174,8 @@ with st.sidebar:
         st.success(f"**Topic:** {st.session_state.topic}")
         
         if st.session_state.target_vocab:
-            st.markdown("**🆕 New Target Words:**")
+            st.markdown("**🆕 Target Words:**")
             st.write(", ".join(st.session_state.target_vocab))
-            
-        if st.session_state.get("review_vocab"):
-            st.markdown("**🔄 Review These:**")
-            st.write(", ".join(st.session_state.review_vocab))
             
         if not st.session_state.get("reading_phase", False):
             current = st.session_state.accumulated_speaking_time
@@ -255,18 +255,26 @@ if api_key:
                         try:
                             audio_bio = io.BytesIO(audio['bytes'])
                             audio_bio.name = "audio.webm"
+                            
+                            # 🔥 YENİ: WHISPER PROMPT AYARI (Context Injection)
+                            # Modele ne hakkında konuştuğunu söylüyoruz ki uydurmasın.
                             transcript = client.audio.transcriptions.create(
-                                model="whisper-1", file=audio_bio, language="en", temperature=0,
-                                prompt=f"User speaking English about {st.session_state.topic}."
+                                model="whisper-1", 
+                                file=audio_bio, 
+                                language="en", 
+                                temperature=0.2, # Yaratıcılık çok düşük ama 0 değil (döngüyü kırmak için)
+                                prompt=f"The user is speaking English about {st.session_state.topic}. This is a language lesson."
                             ).text
                             
+                            # --- 🚨 GÜÇLENDİRİLMİŞ FİLTRE ---
                             is_hallucination = False
                             for banned in BANNED_PHRASES:
-                                if banned.lower() in transcript.lower() and len(transcript) < 50:
+                                if banned.lower() in transcript.lower():
                                     is_hallucination = True; break
                             
-                            if is_hallucination or not transcript.strip():
-                                st.warning("Please try again.")
+                            # Eğer çok kısaysa veya yasaklı kelime varsa
+                            if is_hallucination or len(transcript.strip()) < 2:
+                                st.warning("Audio unclear. Please speak closer to the microphone.")
                             else:
                                 word_count = len(transcript.split())
                                 st.session_state.accumulated_speaking_time += word_count * 0.7
@@ -281,9 +289,9 @@ if api_key:
                                 tts.write_to_fp(audio_fp)
                                 st.session_state.last_audio_response = audio_fp.getvalue()
                                 st.rerun()
-                        # 🔥 BURASI DEĞİŞTİ: HATAYI GİZLEMEK YERİNE GÖSTERİYORUZ
+                                
                         except Exception as e: 
-                            st.error(f"⚠️ AUDIO ERROR DETAILS: {e}")
+                            st.error(f"⚠️ AUDIO ERROR: {e}")
 
         # FAZ 2: OKUMA
         else:
@@ -305,16 +313,15 @@ if api_key:
             
             with c_read_fin:
                 if st.button("🏁 FINISH LESSON & GET FEEDBACK", type="primary", use_container_width=True):
-                    with st.spinner("Analyzing performance & Creating Report..."):
+                    with st.spinner("Analyzing performance..."):
                         analysis_prompt = """
-                        ANALYZE the entire session (Speaking + Reading answers).
-                        PROVIDE A DETAILED REPORT IN JSON:
+                        ANALYZE the entire session. PROVIDE REPORT IN JSON:
                         {
                             "score": (0-100),
                             "learned_words": ["word1", "word2"],
                             "pros": ["Good pronunciation", "Used target words"],
-                            "cons": ["Grammar error in past tense", "Hesitation"],
-                            "suggestions": ["Practice irregular verbs", "Watch movies"],
+                            "cons": ["Grammar error", "Hesitation"],
+                            "suggestions": ["Practice X", "Watch Y"],
                             "level_recommendation": "Stay/Up"
                         }
                         """
@@ -322,7 +329,7 @@ if api_key:
                         try:
                             res = client.chat.completions.create(model="gpt-4o", messages=msgs)
                             rep = strict_json_parse(res.choices[0].message.content)
-                            if not rep: rep = {"score": 75, "pros": ["Good effort"], "cons": [], "suggestions": []}
+                            if not rep: rep = {"score": 75, "pros": [], "cons": [], "suggestions": []}
 
                             user_data["lessons_completed"] += 1
                             if "learned_words" in rep: user_data["vocabulary_bank"].extend(rep["learned_words"])
@@ -333,7 +340,7 @@ if api_key:
                             save_data(user_data)
                             
                             st.balloons()
-                            st.markdown(f"## 📊 Lesson Report (Score: {rep.get('score')})")
+                            st.markdown(f"## 📊 Score: {rep.get('score')}")
                             c1, c2 = st.columns(2)
                             with c1: st.success(f"**✅ Pros:**\n" + "\n".join([f"- {i}" for i in rep.get('pros', [])]))
                             with c2: st.error(f"**🔻 Areas to Improve:**\n" + "\n".join([f"- {i}" for i in rep.get('cons', [])]))
@@ -352,7 +359,7 @@ if api_key:
                             model="whisper-1", file=audio_bio, language="en", temperature=0
                         ).text
                         st.success(f"**Your Answers:** {transcript}")
-                        st.session_state.messages.append({"role": "user", "content": f"My answers to reading questions: {transcript}"})
+                        st.session_state.messages.append({"role": "user", "content": f"Reading answers: {transcript}"})
                     except Exception as e: 
                         st.error(f"⚠️ Reading Audio Error: {e}")
                     
