@@ -7,10 +7,9 @@ import random
 import io
 import time
 
-# --- 1. AYARLAR & SABİTLER ---
+# --- 1. AYARLAR ---
 st.set_page_config(page_title="Iron Discipline Coach", page_icon="🛡️", layout="wide")
 
-MIN_DURATION_MINUTES = 10  # Zorunlu ders süresi (Dakika olarak)
 DATA_FILE = "user_data.json"
 
 TOPIC_POOL = {
@@ -39,7 +38,7 @@ def save_data(data):
 user_data = load_data()
 
 # --- 3. DERS BAŞLATICI ---
-def start_lesson_logic(client, level, mode):
+def start_lesson_logic(client, level, mode, duration_mins):
     # 1. Konu ve Rol Seçimi
     if mode == "EXAM":
         topic = random.choice(TOPIC_POOL[level])
@@ -51,10 +50,9 @@ def start_lesson_logic(client, level, mode):
         topic = random.choice(TOPIC_POOL.get(level, ["General Conversation"]))
         system_role = f"ACT AS: Helpful Coach. LEVEL: {level}. TOPIC: {topic}. Keep conversation going. Correct major mistakes kindly."
 
-    # 2. Hedef Kelimeleri Belirle (Normal Ders ise)
+    # 2. Hedef Kelimeleri Belirle
     target_vocab = []
     if mode == "LESSON":
-        # GPT'den konuyla ilgili 5 kelime istiyoruz
         vocab_prompt = f"Generate 5 useful English words (JSON list of strings) related to '{topic}' for {level} level learner. Output ONLY valid JSON: ['word1', 'word2'...]"
         try:
             res = client.chat.completions.create(
@@ -65,26 +63,24 @@ def start_lesson_logic(client, level, mode):
                 ]
             )
             content = res.choices[0].message.content
-            # Temizlik (bazen ```json``` ekler)
             if "```" in content: content = content.split("[")[1].split("]")[0]
             if "[" not in content: content = "[" + content + "]"
-            
             target_vocab = json.loads(content)
         except:
-            target_vocab = ["opinion", "suggest", "experience", "prefer", "describe"] # Yedek kelimeler
+            target_vocab = ["opinion", "suggest", "experience", "prefer", "describe"]
 
-    # 3. Oturumu Başlat
+    # 3. Oturumu Başlat (Değişkenleri Kaydet)
     st.session_state.lesson_active = True
     st.session_state.start_time = time.time()
+    st.session_state.target_duration = duration_mins * 60 # Saniyeye çevir
     st.session_state.target_vocab = target_vocab
     st.session_state.topic = topic
     
-    # Sisteme ilk emri ver
-    final_prompt = f"{system_role}\nCONTEXT: The student must try to use these words: {', '.join(target_vocab)}.\nIf they use one, PRAISE them briefly inside parentheses like (Great usage of 'word'!)."
+    final_prompt = f"{system_role}\nCONTEXT: The student must try to use these words: {', '.join(target_vocab)}.\nIf they use one, PRAISE them briefly inside parentheses."
     
     st.session_state.messages = [{"role": "system", "content": final_prompt}]
     
-    # İlk mesajı al
+    # İlk Mesaj
     try:
         first_res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
         first_msg = first_res.choices[0].message.content
@@ -96,7 +92,6 @@ def start_lesson_logic(client, level, mode):
 with st.sidebar:
     st.title("🛡️ Öğrenci Kimliği")
     
-    # API Anahtarı Kontrolü
     if "OPENAI_API_KEY" in st.secrets:
         api_key = st.secrets["OPENAI_API_KEY"]
     else:
@@ -104,65 +99,50 @@ with st.sidebar:
 
     st.divider()
 
-    # --- KİMLİK KARTI ---
     col_a, col_b = st.columns(2)
     with col_a:
         st.metric(label="Seviye", value=user_data['current_level'])
     with col_b:
-        # Tamamlanan + 1 = Şu anki ders
         st.metric(label="Ders No", value=user_data['lessons_completed'] + 1)
     
     st.info(f"📚 **Kelime Hazinesi:** {len(user_data['vocabulary_bank'])} Kelime")
 
-    # --- SINAV İLERLEMESİ ---
     st.write("---")
     if user_data["next_mode"] == "EXAM":
         st.error("⚠️ **DURUM: SINAV ZAMANI!**")
-        st.caption("Bu ders seviye belirleme sınavıdır.")
     elif user_data["next_mode"] == "ASSESSMENT":
         st.warning("⚠️ **DURUM: SEVİYE TESPİT**")
     else:
-        # Sınava kalan ders hesabı
         completed_in_cycle = user_data['lessons_completed'] % 5
         kalan = 5 - completed_in_cycle
-        progress_val = completed_in_cycle / 5.0
-        
         st.write(f"🎯 **Sınava Kalan:** {kalan} Ders")
-        st.progress(progress_val)
+        st.progress(completed_in_cycle / 5.0)
     
-    # --- AKTİF DERS BİLGİSİ ---
     if st.session_state.get("lesson_active", False):
         st.divider()
         st.markdown("### ⏱️ Canlı Ders")
-        
-        # Konu
         st.success(f"**Konu:** {st.session_state.topic}")
         
-        # Hedef Kelimeler
         if st.session_state.target_vocab:
-            st.warning("🔑 **Kullanılacak Kelimeler:**")
+            st.warning("🔑 **Hedef Kelimeler:**")
             for word in st.session_state.target_vocab:
                 st.markdown(f"- `{word}`")
         
-        # Zaman Sayacı (Basit Gösterim)
+        # ZAMAN SAYACI
         elapsed = int(time.time() - st.session_state.start_time)
-        remaining = (MIN_DURATION_MINUTES * 60) - elapsed
+        target = st.session_state.target_duration
+        remaining = target - elapsed
         
         if remaining > 0:
             st.error(f"⏳ **Kalan:** {remaining // 60} dk {remaining % 60} sn")
         else:
             st.success("✅ **Süre Doldu!** Çıkabilirsin.")
 
-    # Sıfırlama Butonu (En altta gizli)
     st.divider()
     with st.expander("Tehlikeli Bölge"):
         if st.button("TÜM İLERLEMEYİ SİL"):
             save_data({
-                "current_level": "A2", 
-                "lessons_completed": 0, 
-                "exam_scores": [], 
-                "vocabulary_bank": [], 
-                "next_mode": "ASSESSMENT"
+                "current_level": "A2", "lessons_completed": 0, "exam_scores": [], "vocabulary_bank": [], "next_mode": "ASSESSMENT"
             })
             st.rerun()
 
@@ -172,162 +152,51 @@ if api_key:
 
     st.title("⚔️ Iron Discipline Language Core")
 
-    # A) DERS BAŞLAMADIYSA -> BAŞLAT EKRANI
+    # A) DERS BAŞLAMADIYSA -> AYARLAR VE BAŞLAT
     if not st.session_state.get("lesson_active", False):
-        st.markdown(
-            f"""
-            ### Hoş geldin! 👋
-            Bugünkü hedefin **{MIN_DURATION_MINUTES} dakika** boyunca İngilizce konuşmak.
-            
-            - **Seviye:** {user_data['current_level']}
-            - **Mod:** {user_data['next_mode']}
-            """
-        )
+        st.markdown(f"### Hoş geldin! 👋")
         
+        col_info, col_set = st.columns([2, 1])
+        
+        with col_info:
+            st.info(f"📍 **Seviye:** {user_data['current_level']} | **Mod:** {user_data['next_mode']}")
+            st.write("Ders süresini seç ve başla. Süre dolmadan çıkış yapamazsın!")
+
+        with col_set:
+            # SÜRE AYARI (SLIDER)
+            selected_duration = st.slider("⏳ Ders Süresi (Dakika)", min_value=1, max_value=30, value=10, step=1)
+        
+        st.write("")
         btn_label = "🚀 DERSİ BAŞLAT" if user_data["next_mode"] != "EXAM" else "🔥 SINAVI BAŞLAT"
         
-        if st.button(btn_label, type="primary"):
+        if st.button(btn_label, type="primary", use_container_width=True):
             with st.spinner("Yapay Zeka Hazırlanıyor..."):
-                start_lesson_logic(client, user_data["current_level"], user_data["next_mode"])
+                start_lesson_logic(client, user_data["current_level"], user_data["next_mode"], selected_duration)
                 st.rerun()
 
-    # B) DERS AKTİFSE -> SOHBET EKRANI
+    # B) DERS AKTİFSE -> SOHBET
     else:
-        # Mesajları Göster
         chat_container = st.container()
         with chat_container:
             for msg in st.session_state.messages:
                 if msg["role"] != "system":
-                    # Sistem mesajlarını gizle, sadece konuşmayı göster
                     avatar = "🤖" if msg["role"] == "assistant" else "👤"
                     with st.chat_message(msg["role"], avatar=avatar):
                         st.write(msg["content"])
 
-        # Alt Kontrol Alanı
         st.write("---")
         col_mic, col_finish = st.columns([1, 4])
         
         with col_mic:
-            # MİKROFON
             audio = mic_recorder(start_prompt="🎤 KONUŞ", stop_prompt="⏹️ GÖNDER", key="recorder")
         
         with col_finish:
-            # BİTİR BUTONU
             elapsed_sec = time.time() - st.session_state.start_time
-            if st.button("🏁 DERSİ BİTİR / FINISH LESSON"):
-                
-                # ZAMAN KİLİDİ KONTROLÜ
-                # Eğer "ASSESSMENT" (Seviye tespiti) ise süre kuralı esnektir, değilse katıdır.
-                if user_data["next_mode"] != "ASSESSMENT" and elapsed_sec < (MIN_DURATION_MINUTES * 60):
-                    missing_sec = (MIN_DURATION_MINUTES * 60) - elapsed_sec
-                    st.toast("🚫 ERKEN ÇIKIŞ YASAK!", icon="🔒")
-                    st.error(f"Disiplin bozulamaz! Daha {int(missing_sec // 60)} dakika {int(missing_sec % 60)} saniye konuşmalısın.")
-                    
-                    # GPT'ye "Kızdır" emri
-                    st.session_state.messages.append({
-                        "role": "system", 
-                        "content": "User tried to quit early. Refuse strictly and ask a new engaging question about the topic to keep them speaking."
-                    })
-                    try:
-                        res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
-                        st.session_state.messages.append({"role": "assistant", "content": res.choices[0].message.content})
-                        st.rerun()
-                    except:
-                        pass
-                
-                else:
-                    # SÜRE TAMAMLANDI -> ANALİZ YAP
-                    st.session_state.lesson_active = False 
-                    
-                    with st.spinner("Ders Analiz Ediliyor & Kaydediliyor..."):
-                        analysis_prompt = """
-                        ANALYZE the session.
-                        OUTPUT ONLY JSON:
-                        {
-                            "score": (0-100 integer),
-                            "learned_words": ["word1", "word2"],
-                            "fluency_feedback": "Short advice",
-                            "level_recommendation": "Stay/Up/Down"
-                        }
-                        """
-                        msgs = st.session_state.messages + [{"role": "system", "content": analysis_prompt}]
-                        try:
-                            res = client.chat.completions.create(model="gpt-4o", messages=msgs)
-                            content = res.choices[0].message.content
-                            if "```" in content: content = content.split("json")[1].split("```")[0]
-                            report = json.loads(content)
-                            
-                            # Verileri Güncelle
-                            user_data["lessons_completed"] += 1
-                            if "learned_words" in report:
-                                user_data["vocabulary_bank"].extend(report["learned_words"])
-                            
-                            # Mod Yönetimi (Sınav Döngüsü)
-                            if user_data["next_mode"] == "ASSESSMENT":
-                                # Seviye Tespiti Sonucu
-                                rec = report.get("level_recommendation", "A2")
-                                if "Up" in rec: user_data["current_level"] = "B1" # Basit mantık
-                                elif "A2" in str(report): user_data["current_level"] = "A2"
-                                elif "B1" in str(report): user_data["current_level"] = "B1"
-                                else: user_data["current_level"] = "A2"
-                                
-                                user_data["next_mode"] = "LESSON"
-                                st.balloons()
-                                st.success(f"Seviyen Belirlendi: {user_data['current_level']}")
-
-                            elif user_data["lessons_completed"] % 5 == 0:
-                                user_data["next_mode"] = "EXAM"
-                                st.warning("Bir sonraki ders SINAV olacak!")
-                            
-                            elif user_data["next_mode"] == "EXAM":
-                                # Sınav Bitti
-                                score = report.get("score", 0)
-                                user_data["exam_scores"].append(score)
-                                if score >= 75:
-                                    st.balloons()
-                                    st.success(f"Sınavı Geçtin! Puan: {score}")
-                                    # Seviye Yükseltme Basit Mantık (Örn: A2 -> B1)
-                                    if user_data["current_level"] == "A2": user_data["current_level"] = "B1"
-                                    elif user_data["current_level"] == "B1": user_data["current_level"] = "B2"
-                                else:
-                                    st.error(f"Sınav Puanın: {score}. Tekrar etmelisin.")
-                                user_data["next_mode"] = "LESSON"
-
-                            else:
-                                user_data["next_mode"] = "LESSON"
-
-                            save_data(user_data)
-                            st.success("✅ İlerleme Kaydedildi.")
-                            st.json(report)
-                            
-                        except Exception as e:
-                            st.error(f"Analiz hatası: {e}")
-                        
-                        if st.button("Ana Ekrana Dön"):
-                            st.rerun()
-
-        # SES İŞLEME
-        if audio:
-            # 1. Whisper
-            with st.spinner("Dinliyor..."):
-                try:
-                    transcript = client.audio.transcriptions.create(
-                        model="whisper-1", 
-                        file=io.BytesIO(audio['bytes']), 
-                        name="audio.webm", 
-                        language="en"
-                    ).text
-                    
-                    st.session_state.messages.append({"role": "user", "content": transcript})
-                    
-                    # 2. GPT Cevabı
-                    with st.spinner("Cevaplıyor..."):
-                        res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
-                        reply = res.choices[0].message.content
-                        st.session_state.messages.append({"role": "assistant", "content": reply})
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"Ses hatası: {e}")
-
-else:
-    st.warning("Lütfen API Anahtarınızı girin.")
+            target_sec = st.session_state.target_duration
+            
+            if st.button("🏁 DERSİ BİTİR / FINISH", use_container_width=True):
+                # ZAMAN KİLİDİ
+                if user_data["next_mode"] != "ASSESSMENT" and elapsed_sec < target_sec:
+                    missing = target_sec - elapsed_sec
+                    st.toast("🚫 ÇIKIŞ YASAK!", icon="🔒")
+                    st.error(f"Disiplin! Daha {int
