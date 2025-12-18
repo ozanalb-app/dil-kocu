@@ -13,10 +13,13 @@ import re
 st.set_page_config(page_title="Pınar's Friend", page_icon="🎤", layout="wide")
 DATA_FILE = "user_data.json"
 
-# WHISPER'IN UYDURDUĞU YASAKLI CÜMLELER (HALLUCINATION LIST)
+# --- 🚨 GENİŞLETİLMİŞ HALÜSİNASYON LİSTESİ ---
+# Whisper sessizlikte bunları uydurur. Hepsini engelliyoruz.
 BANNED_PHRASES = [
     "Hi, how are you?", "Good to see you", "Thank you", "Thanks for watching", 
-    "Copyright", "Subscribe", "Amara.org", "You", "you"
+    "Copyright", "Subscribe", "Amara.org", "You", "you", 
+    "Watch this video", "watch this video", "Watch the video", 
+    "Subtitle", "Caption", "MBC", "Al Jazeera", "CNN"
 ]
 
 # --- KONU HAVUZU ---
@@ -134,7 +137,7 @@ def start_lesson_logic(client, level, mode, target_speaking_seconds):
                 "adapt", "adjust", "cope", "respond", "anticipate", "complex", "abstract", "practical", "theoretical", "systematic"
             ]
         
-        # AKILLI FİLTRELEME (TEKRARI ÖNLER)
+        # Akıllı Filtreleme
         learned_set = set(user_data.get("vocabulary_bank", []))
         unknown_words = [w for w in full_vocab_list if w not in learned_set]
         pool_to_select_from = unknown_words if len(unknown_words) >= 5 else full_vocab_list
@@ -288,9 +291,7 @@ if api_key:
                         audio_bio = io.BytesIO(audio['bytes'])
                         audio_bio.name = "audio.webm"
                         
-                        # --- 🔥 HALÜSİNASYON DÜZELTME (ANTI-HALLUCINATION) ---
-                        # temperature=0: Yaratıcılığı sıfırla, sadece duyduğunu yaz
-                        # prompt="...": Modelin boşlukta saçmalamasını engelle
+                        # --- 🔥 HALLUCINATION FIX ---
                         transcript = client.audio.transcriptions.create(
                             model="whisper-1", 
                             file=audio_bio, 
@@ -299,18 +300,18 @@ if api_key:
                             prompt=f"The user is speaking English about {st.session_state.topic}. Do not make up words."
                         ).text
                         
-                        # --- 🚨 FİLTRE: YASAKLI KELİMELERİ KONTROL ET ---
-                        # Eğer Whisper saçmalamışsa (Hi how are you vb.), bunu YUT.
+                        # FİLTRELEME
                         is_hallucination = False
-                        for banned in ["Hi, how are you", "Thank you", "Copyright", "Amara.org", "Good to see you"]:
-                            if banned.lower() in transcript.lower() and len(transcript) < 30:
+                        # "Watch this video" ve türevlerini de ekledik
+                        for banned in ["Hi, how are you", "Thank you", "Copyright", "Amara.org", "Watch this video", "watch this video", "Watch the video"]:
+                            if banned.lower() in transcript.lower() and len(transcript) < 50:
                                 is_hallucination = True
                                 break
                         
                         if is_hallucination or not transcript.strip():
-                            st.warning("Sesiniz tam alınamadı, lütfen tekrar konuşun.")
+                            st.warning("Ses tam anlaşılamadı (arka plan gürültüsü olabilir). Lütfen tekrar deneyin.")
                         else:
-                            # Her şey yolundaysa devam et
+                            # Süre say ve devam et
                             word_count = len(transcript.split())
                             estimated_seconds = word_count * 0.7 
                             st.session_state.accumulated_speaking_time += estimated_seconds
