@@ -13,6 +13,12 @@ import re
 st.set_page_config(page_title="Pınar's Friend", page_icon="🎤", layout="wide")
 DATA_FILE = "user_data.json"
 
+# WHISPER'IN UYDURDUĞU YASAKLI CÜMLELER (HALLUCINATION LIST)
+BANNED_PHRASES = [
+    "Hi, how are you?", "Good to see you", "Thank you", "Thanks for watching", 
+    "Copyright", "Subscribe", "Amara.org", "You", "you"
+]
+
 # --- KONU HAVUZU ---
 TOPIC_POOL = {
     "A2": [
@@ -128,19 +134,11 @@ def start_lesson_logic(client, level, mode, target_speaking_seconds):
                 "adapt", "adjust", "cope", "respond", "anticipate", "complex", "abstract", "practical", "theoretical", "systematic"
             ]
         
-        # --- 🔥 AKILLI FİLTRELEME (Smart Filter) ---
-        # 1. Daha önce öğrenilenleri (user_data["vocabulary_bank"]) al
+        # AKILLI FİLTRELEME (TEKRARI ÖNLER)
         learned_set = set(user_data.get("vocabulary_bank", []))
-        
-        # 2. Tam listeden, öğrenilenleri çıkar -> Geriye "Bilinmeyenler" kalsın
         unknown_words = [w for w in full_vocab_list if w not in learned_set]
-        
-        # 3. Eğer bilinmeyen kelime sayısı 5'ten azsa (neredeyse hepsini öğrendiyse),
-        #    mecburen tüm listeyi tekrar aç (sıfırlamak gibi).
-        #    Değilse, sadece bilinmeyenlerden seç.
         pool_to_select_from = unknown_words if len(unknown_words) >= 5 else full_vocab_list
         
-        # 4. Rastgele 5 tane seç
         if pool_to_select_from:
             target_vocab = random.sample(pool_to_select_from, 5)
 
@@ -187,7 +185,6 @@ with st.sidebar:
         if st.session_state.target_vocab:
             st.caption(f"**Hedefler:** {', '.join(st.session_state.target_vocab)}")
             
-        # SÜRE HESABI
         current = st.session_state.accumulated_speaking_time
         target = st.session_state.target_speaking_seconds
         
@@ -253,14 +250,10 @@ if api_key:
                         try:
                             res = client.chat.completions.create(model="gpt-4o", messages=msgs)
                             rep = strict_json_parse(res.choices[0].message.content)
-                            
                             if not rep: rep = {"score": 80, "level_recommendation": "Stay"}
 
                             user_data["lessons_completed"] += 1
-                            # Analizden gelen yeni öğrenilenleri kaydediyoruz
-                            # Bu sayede bir sonraki derste bunlar filtrelenecek!
                             if "learned_words" in rep: 
-                                # Sadece hedef kelimeleri değil, raporda gelenleri ekliyoruz
                                 user_data["vocabulary_bank"].extend(rep["learned_words"])
                             
                             if user_data["next_mode"] == "ASSESSMENT":
@@ -295,29 +288,46 @@ if api_key:
                         audio_bio = io.BytesIO(audio['bytes'])
                         audio_bio.name = "audio.webm"
                         
+                        # --- 🔥 HALÜSİNASYON DÜZELTME (ANTI-HALLUCINATION) ---
+                        # temperature=0: Yaratıcılığı sıfırla, sadece duyduğunu yaz
+                        # prompt="...": Modelin boşlukta saçmalamasını engelle
                         transcript = client.audio.transcriptions.create(
                             model="whisper-1", 
                             file=audio_bio, 
                             language="en",
-                            prompt=f"Lesson topic: {st.session_state.topic}"
+                            temperature=0, 
+                            prompt=f"The user is speaking English about {st.session_state.topic}. Do not make up words."
                         ).text
                         
-                        word_count = len(transcript.split())
-                        estimated_seconds = word_count * 0.7 
-                        st.session_state.accumulated_speaking_time += estimated_seconds
+                        # --- 🚨 FİLTRE: YASAKLI KELİMELERİ KONTROL ET ---
+                        # Eğer Whisper saçmalamışsa (Hi how are you vb.), bunu YUT.
+                        is_hallucination = False
+                        for banned in ["Hi, how are you", "Thank you", "Copyright", "Amara.org", "Good to see you"]:
+                            if banned.lower() in transcript.lower() and len(transcript) < 30:
+                                is_hallucination = True
+                                break
                         
-                        st.session_state.messages.append({"role": "user", "content": transcript})
-                        
-                        res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
-                        reply = res.choices[0].message.content
-                        st.session_state.messages.append({"role": "assistant", "content": reply})
-                        
-                        tts = gTTS(text=reply, lang='en')
-                        audio_fp = io.BytesIO()
-                        tts.write_to_fp(audio_fp)
-                        st.session_state.last_audio_response = audio_fp.getvalue()
-                        
-                        st.rerun()
+                        if is_hallucination or not transcript.strip():
+                            st.warning("Sesiniz tam alınamadı, lütfen tekrar konuşun.")
+                        else:
+                            # Her şey yolundaysa devam et
+                            word_count = len(transcript.split())
+                            estimated_seconds = word_count * 0.7 
+                            st.session_state.accumulated_speaking_time += estimated_seconds
+                            
+                            st.session_state.messages.append({"role": "user", "content": transcript})
+                            
+                            res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
+                            reply = res.choices[0].message.content
+                            st.session_state.messages.append({"role": "assistant", "content": reply})
+                            
+                            tts = gTTS(text=reply, lang='en')
+                            audio_fp = io.BytesIO()
+                            tts.write_to_fp(audio_fp)
+                            st.session_state.last_audio_response = audio_fp.getvalue()
+                            
+                            st.rerun()
+                            
                     except Exception as e:
                         st.error(f"Hata: {e}")
 else:
