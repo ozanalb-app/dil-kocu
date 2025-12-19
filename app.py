@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v17", page_icon="🧩", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v18", page_icon="🔊", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- HALÜSİNASYON FİLTRESİ ---
@@ -153,7 +153,7 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes):
     st.session_state.topic = topic
     st.session_state.last_audio_bytes = None
     
-    # Başlangıç
+    # Başlangıç Mesajı
     intro = f"Start by saying 'Hello Pınar! Today's topic is {topic}'."
     prompt = f"{system_role}\n{intro}\nCONTEXT: {', '.join(target_vocab)}"
     st.session_state.messages = [{"role": "system", "content": prompt}]
@@ -190,21 +190,32 @@ if api_key:
     client = OpenAI(api_key=api_key)
     page = st.sidebar.radio("📌 Menu", ["🎤 AI Coach", "🏋️ Vocab Gym", "📜 History"])
 
-    # --- VOCAB GYM (KARŞITIRMALI) ---
+    # --- VOCAB GYM (SESLİ) ---
     if page == "🏋️ Vocab Gym":
         st.title("🏋️ Vocabulary Gym")
         c1, c2 = st.columns(2)
         with c1:
             if st.button("🔄 New Card"):
                 pool = VOCAB_POOL.get(user_data["current_level"], ["hello"])
-                # 🔥 LİSTEYİ KARIŞTIR (ALFABETİK OLMASIN)
                 pool_copy = list(pool)
                 random.shuffle(pool_copy)
-                st.session_state.flashcard_word = random.choice(pool_copy)
+                word = random.choice(pool_copy)
+                st.session_state.flashcard_word = word
                 st.session_state.flashcard_revealed = False
+                
+                # 🔥 SES OLUŞTUR VE KAYDET
+                tts = gTTS(text=word, lang='en')
+                audio_fp = io.BytesIO()
+                tts.write_to_fp(audio_fp)
+                st.session_state.vocab_audio = audio_fp.getvalue()
         
         if "flashcard_word" in st.session_state and st.session_state.flashcard_word:
             st.markdown(f"<h1 style='text-align: center; color:#4F8BF9'>{st.session_state.flashcard_word}</h1>", unsafe_allow_html=True)
+            
+            # 🔥 OTOMATİK OYNATMA (GÖRÜNMEZ PLAYER İLE MÜMKÜN DEĞİL AMA PLAYER KOYDUK)
+            if "vocab_audio" in st.session_state:
+                st.audio(st.session_state.vocab_audio, format='audio/mp3', autoplay=True)
+
             if not st.session_state.flashcard_revealed:
                 if st.button("👀 Show Meaning"):
                     st.session_state.flashcard_revealed = True
@@ -242,7 +253,6 @@ if api_key:
                 curr = st.session_state.accumulated_speaking_time
                 targ = st.session_state.target_speaking_seconds
                 prog = min(curr/targ, 1.0) if targ > 0 else 0
-                
                 c_min = int(curr // 60)
                 c_sec = int(curr % 60)
                 t_min = int(targ // 60)
@@ -332,7 +342,6 @@ if api_key:
                                 else:
                                     st.session_state.accumulated_speaking_time += len(txt.split()) * 0.7
                                     
-                                    # 🔥 GEVŞEK VE TÜRKÇE GRAMER KONTROLÜ
                                     corr = None
                                     try:
                                         p_check = f"Check '{txt}'. IGNORE 'the', 'a', 'an', prepositions and punctuation. ONLY report MAJOR verb/tense errors. If wrong, return 'Düzeltme: [Correct Sentence]'. Else return 'OK'."
