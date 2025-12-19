@@ -10,7 +10,7 @@ import time
 import re
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v7 (Blind Mode)", page_icon="🎧", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v7.1", page_icon="🎓", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- HALÜSİNASYON FİLTRESİ ---
@@ -106,10 +106,12 @@ def start_lesson_logic(client, level, mode, target_speaking_seconds):
     assigned_topic = None
     assigned_vocab = []
     
+    # Ödev Kontrolü
     if mode == "LESSON" and user_data.get("next_lesson_prep"):
         plan = user_data["next_lesson_prep"]
         assigned_topic = plan.get("topic")
         assigned_vocab = plan.get("vocab", [])
+        # Planı tüketiyoruz
         user_data["next_lesson_prep"] = None 
         save_data(user_data)
         st.toast(f"📅 Planned Lesson Loaded: {assigned_topic}", icon="check")
@@ -222,8 +224,14 @@ if api_key:
 
     if not st.session_state.get("lesson_active", False):
         st.markdown(f"### Welcome Pınar! Ready for **{user_data['current_level']}**?")
+        
+        # Eğer ödev varsa yukarıda gösteriyoruz
+        if user_data.get("next_lesson_prep"):
+            st.success(f"🎯 **Ready for:** {user_data['next_lesson_prep']['topic']}")
+            
         target_sec = st.slider("Target Speaking Time (Seconds)", 30, 300, 60, step=30)
         btn = "🚀 START LESSON" if user_data["next_mode"] != "EXAM" else "🔥 START EXAM"
+        
         if st.button(btn, type="primary", use_container_width=True):
             with st.spinner("Preparing curriculum..."):
                 start_lesson_logic(client, user_data["current_level"], user_data["next_mode"], target_sec)
@@ -233,11 +241,6 @@ if api_key:
         # FAZ 1: KONUŞMA (BLIND LISTENING MODE)
         if not st.session_state.get("reading_phase", False):
             
-            # --- 🔥 BLIND MODE GÖSTERİM MANTIĞI ---
-            # Mesajları döngüye sokuyoruz.
-            # Eğer mesaj "Assistant"ın SON mesajı ise -> GİZLE.
-            # Değilse -> GÖSTER.
-            
             chat_container = st.container()
             with chat_container:
                 messages_len = len(st.session_state.messages)
@@ -246,20 +249,16 @@ if api_key:
                         is_last_message = (i == messages_len - 1)
                         is_assistant = (msg["role"] == "assistant")
 
-                        # Eğer son mesaj asistanınsa -> GİZLE (Kör Modu)
                         if is_last_message and is_assistant:
                             with st.chat_message("assistant", avatar="🤖"):
-                                st.write("🔊 **Dinleme Modu Aktif...** (Cevabı duymak için oynatın)")
-                                with st.expander("👀 Duyduğunu anlayamadın mı? Metni görmek için tıkla."):
+                                st.write("🔊 **Listening Mode...** (Play audio)")
+                                with st.expander("👀 Click to reveal text"):
                                     st.write(msg["content"])
-                        
-                        # Diğer tüm mesajları normal göster
                         else:
                             avatar = "🤖" if msg["role"]=="assistant" else "👤"
                             with st.chat_message(msg["role"], avatar=avatar):
                                 st.write(msg["content"])
             
-            # Ses Oynatıcı (Metnin altında)
             if "last_audio_response" in st.session_state and st.session_state.last_audio_response:
                 st.audio(st.session_state.last_audio_response, format="audio/mp3", autoplay=True)
 
@@ -303,7 +302,6 @@ if api_key:
                         try:
                             audio_bio = io.BytesIO(audio['bytes'])
                             audio_bio.name = "audio.webm"
-                            
                             transcript = client.audio.transcriptions.create(
                                 model="whisper-1", file=audio_bio, language="en", temperature=0.2,
                                 prompt=f"The user is speaking English about {st.session_state.topic}."
@@ -347,7 +345,7 @@ if api_key:
                 for i, q in enumerate(questions):
                     ans = st.text_input(f"{i+1}. {q}", key=f"q_{i}")
                     answers.append(ans)
-                submitted = st.form_submit_button("🏁 SUBMIT ANSWERS & FINISH LESSON")
+                submitted = st.form_submit_button("🏁 SUBMIT ANSWERS & GET FEEDBACK")
             
             if submitted:
                 user_answers_dict = {f"Q{i+1}": ans for i, ans in enumerate(answers)}
@@ -413,6 +411,16 @@ if api_key:
                         st.code(", ".join(hw.get('vocab', [])))
 
                         st.session_state.lesson_active = False
+                        
+                        # --- 🔥 SONRAKİ DERSE GEÇ BUTONU ---
+                        if st.button("🚀 START NEXT LESSON NOW", type="primary", use_container_width=True):
+                            # Session temizliği
+                            st.session_state.messages = []
+                            st.session_state.reading_phase = False
+                            st.session_state.reading_content = {}
+                            st.session_state.accumulated_speaking_time = 0
+                            # Ekranı yenile (Bu sefer 'next_lesson_prep' dolu olduğu için oradan başlayacak)
+                            st.rerun()
 
                     except Exception as e:
                         st.error(f"Report Error: {e}")
