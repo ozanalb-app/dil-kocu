@@ -333,7 +333,7 @@ with st.sidebar:
 # --- 6. ANA AKIŞ ---
 if api_key:
     client = OpenAI(api_key=api_key)
-    st.title("🗣️ AI Personal Coach (Blind Mode)")
+    st.title("🗣️ Pınar's Personal Coach (Blind Mode)")
 
     # --- GEÇMİŞ EKRANI ---
     if st.session_state.get("show_history", False):
@@ -574,4 +574,5 @@ if api_key:
                     
 else:
     st.warning("Enter API Key")
+
 
