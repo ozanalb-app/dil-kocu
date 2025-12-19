@@ -241,7 +241,7 @@ if api_key:
 
     # --- MAIN COACH ---
     elif page == "🎤 AI Coach":
-        st.title("🗣️ AI Personal Coach")
+        st.title("🗣️ Pınar'ın AI Dil Koçu")
         with st.sidebar:
             st.divider()
             sub = determine_sub_level(user_data['current_level'], user_data['lessons_completed'])
@@ -453,4 +453,5 @@ if api_key:
                         st.rerun()
 else:
     st.warning("Enter API Key")
+
 
