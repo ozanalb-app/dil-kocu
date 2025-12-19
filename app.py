@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v19.1", page_icon="🎤", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v19.2", page_icon="🎭", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- HALÜSİNASYON FİLTRESİ ---
@@ -118,11 +118,11 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes):
     
     if mode == "LESSON" and user_data.get("next_lesson_prep"):
         plan = user_data["next_lesson_prep"]
-        assigned_scenario = plan.get("scenario")
+        # 🔥 FIX: Eski verilerde 'scenario' yoksa 'topic' anahtarını kullan
+        assigned_scenario = plan.get("scenario", plan.get("topic"))
         assigned_vocab = plan.get("vocab", [])
         st.toast(f"📅 Planned Scenario: {assigned_scenario}", icon="✅")
 
-    # 🔥 SIKI YÖNETİM PROMPTLARI (KISA CEVAP + ZORUNLU SORU)
     if mode == "EXAM":
         scenario = random.choice(SCENARIO_POOL)
         system_role = f"ACT AS: Strict Examiner. LEVEL: {full_level_desc}. SCENARIO: {scenario}. CRITICAL: Do NOT give long feedback. Do NOT summarize. ASK A QUESTION IMMEDIATELY. Max 20 words."
@@ -305,7 +305,8 @@ if api_key:
         for h in reversed(hist):
             with st.expander(f"📚 {h.get('date')} - {h.get('topic')}"):
                 st.write(f"**Score:** {h.get('score')}")
-                st.warning(f"**Grammar:**\n" + "\n".join([f"- {t}" for t in h.get('grammar_topics', [])]))
+                st.caption(f"Speak: {h.get('speaking_score')} | Read: {h.get('reading_score')}")
+                st.warning(f"**Grammar Needs:**\n" + "\n".join([f"- {t}" for t in h.get('grammar_topics', [])]))
 
     # --- SCENARIO COACH ---
     elif page == "🎭 Scenario Coach":
@@ -329,7 +330,11 @@ if api_key:
 
         if not st.session_state.get("lesson_active", False):
             if user_data.get("next_lesson_prep"):
-                st.success(f"🎯 Next: {user_data['next_lesson_prep']['scenario']}")
+                # 🔥 FIX: 'scenario' yoksa 'topic' i göster, o da yoksa 'Unknown'
+                prep = user_data.get("next_lesson_prep", {})
+                sc_name = prep.get("scenario", prep.get("topic", "Unknown"))
+                st.success(f"🎯 Next: {sc_name}")
+                
             mins = st.slider("Duration (Mins)", 0.5, 30.0, 1.0, step=0.5)
             if st.button("🚀 START SCENARIO"):
                 start_lesson_logic(client, user_data["current_level"], user_data["next_mode"], mins)
@@ -394,9 +399,8 @@ if api_key:
                 if audio:
                     if "last_bytes" not in st.session_state or audio['bytes'] != st.session_state.last_bytes:
                         st.session_state.last_bytes = audio['bytes']
-                        # 🔥 AUDIO ERROR FİX (BOYUT KONTROLÜ)
                         if len(audio['bytes']) < 2000:
-                            st.warning("Ses çok kısa veya anlaşılmadı. Lütfen tekrar konuşun.")
+                            st.warning("Audio unclear. Try again.")
                         else:
                             with st.spinner("Processing..."):
                                 try:
@@ -516,7 +520,10 @@ if api_key:
                     if rep.get('grammar_topics'):
                         st.warning("**Çalış:** " + ", ".join(rep.get('grammar_topics')))
                         
-                    st.info(f"**Next:** {rep.get('next_lesson_homework', {}).get('scenario', 'Unknown')}")
+                    # 🔥 FIX: Güvenli erişim
+                    next_hw = rep.get('next_lesson_homework', {})
+                    next_sc = next_hw.get('scenario', next_hw.get('topic', 'Unknown'))
+                    st.info(f"**Next:** {next_sc}")
                     
                     if st.button("🚀 START NEXT"):
                         st.session_state.messages = []
