@@ -10,16 +10,14 @@ import time
 import re
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v5.2", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v6", page_icon="🎓", layout="wide")
 DATA_FILE = "user_data.json"
 
-# --- 🚨 GENİŞLETİLMİŞ HALÜSİNASYON LİSTESİ (KARA LİSTE) ---
-# Whisper'ın sessizlik anında uydurduğu bilinen cümleler
+# --- HALÜSİNASYON FİLTRESİ ---
 BANNED_PHRASES = [
     "Hi, how are you?", "Good to see you", "Thank you", "Thanks for watching", 
     "Copyright", "Subscribe", "Amara.org", "Watch this video", "You", 
-    "I could not think of anything", "I was so hungry", "I don't know", 
-    "Bye", "The end", "Silence", "Audio", "Music"
+    "I could not think of anything", "Silence", "Bye"
 ]
 
 # --- KONU HAVUZU ---
@@ -65,10 +63,22 @@ TOPIC_POOL = {
 
 # --- 2. YARDIMCI FONKSİYONLAR ---
 def load_data():
+    # 'next_lesson_prep' alanı eklendi (Ödev sistemi için)
     if not os.path.exists(DATA_FILE):
-        return {"current_level": "A2", "lessons_completed": 0, "exam_scores": [], "vocabulary_bank": [], "next_mode": "ASSESSMENT"}
+        return {
+            "current_level": "A2", 
+            "lessons_completed": 0, 
+            "exam_scores": [], 
+            "vocabulary_bank": [], 
+            "next_mode": "ASSESSMENT",
+            "next_lesson_prep": None 
+        }
     with open(DATA_FILE, "r") as f:
-        return json.load(f)
+        data = json.load(f)
+        # Eski veri dosyalarında bu alan yoksa hata vermesin diye kontrol
+        if "next_lesson_prep" not in data:
+            data["next_lesson_prep"] = None
+        return data
 
 def save_data(data):
     with open(DATA_FILE, "w") as f:
@@ -96,6 +106,21 @@ def start_lesson_logic(client, level, mode, target_speaking_seconds):
     sub_level = determine_sub_level(level, user_data["lessons_completed"])
     full_level_desc = f"{level} ({sub_level})"
     
+    # --- 1. ÖDEV KONTROLÜ (HOMEWORK CHECK) ---
+    # Eğer önceki dersten kalan bir "Gelecek Ders Planı" varsa, onu kullan.
+    assigned_topic = None
+    assigned_vocab = []
+    
+    if mode == "LESSON" and user_data.get("next_lesson_prep"):
+        plan = user_data["next_lesson_prep"]
+        assigned_topic = plan.get("topic")
+        assigned_vocab = plan.get("vocab", [])
+        # Planı kullandık, artık silebiliriz (ki sonsuza kadar aynı ders kalmasın)
+        user_data["next_lesson_prep"] = None 
+        save_data(user_data)
+        st.toast(f"📅 Planned Lesson Loaded: {assigned_topic}", icon="check")
+
+    # --- 2. KONU VE ROL ---
     if mode == "EXAM":
         topic = random.choice(TOPIC_POOL[level])
         system_role = f"ACT AS: Strict Examiner. LEVEL: {full_level_desc}. TOPIC: {topic}. GOAL: Test user. RESPONSE STYLE: Short questions."
@@ -103,28 +128,37 @@ def start_lesson_logic(client, level, mode, target_speaking_seconds):
         topic = "Level Assessment"
         system_role = "ACT AS: Examiner. GOAL: Determine level. Ask 3 questions."
     else:
-        topic = random.choice(TOPIC_POOL.get(level, ["General"]))
+        # Eğer ödev varsa onu kullan, yoksa rastgele seç
+        topic = assigned_topic if assigned_topic else random.choice(TOPIC_POOL.get(level, ["General"]))
         system_role = f"ACT AS: Helpful Coach. LEVEL: {full_level_desc}. TOPIC: {topic}. RESPONSE STYLE: Keep answers UNDER 2 SENTENCES."
 
+    # --- 3. KELİME SEÇİMİ ---
     target_vocab = []
     review_vocab = []
     
     if mode == "LESSON":
-        # Örnek havuzlar (Normalde burası senin uzun listelerin olacak)
-        full_vocab_list = ["happy", "travel", "friend", "time", "weather", "family", "weekend", "food", "city", "music"]
-        if level == "B1": full_vocab_list = ["opinion", "suggest", "experience", "prefer", "describe", "recently", "challenge", "career", "habit", "culture"]
-        elif level == "B2": full_vocab_list = ["perspective", "imply", "consequence", "debate", "theory", "significant", "approach", "justify", "complex", "adapt"]
+        # Eğer ödev varsa kelimeleri oradan al
+        if assigned_vocab:
+            target_vocab = assigned_vocab
+        else:
+            # Ödev yoksa normal mantıkla seç
+            full_vocab_list = ["happy", "travel", "friend", "time", "weather", "family", "weekend", "food", "city", "music"]
+            if level == "B1": full_vocab_list = ["opinion", "suggest", "experience", "prefer", "describe", "recently", "challenge", "career", "habit", "culture"]
+            elif level == "B2": full_vocab_list = ["perspective", "imply", "consequence", "debate", "theory", "significant", "approach", "justify", "complex", "adapt"]
 
+            learned_set = set(user_data.get("vocabulary_bank", []))
+            unknown_words = [w for w in full_vocab_list if w not in learned_set]
+            pool = unknown_words if len(unknown_words) >= 5 else full_vocab_list
+            target_vocab = random.sample(pool, min(5, len(pool)))
+
+        # Spaced Repetition (Eski kelimeler)
         learned_set = set(user_data.get("vocabulary_bank", []))
-        unknown_words = [w for w in full_vocab_list if w not in learned_set]
-        pool = unknown_words if len(unknown_words) >= 5 else full_vocab_list
-        target_vocab = random.sample(pool, min(5, len(pool)))
-
         if learned_set:
             past_candidates = [w for w in list(learned_set) if w not in target_vocab]
             if past_candidates:
                 review_vocab = random.sample(past_candidates, min(3, len(past_candidates)))
 
+    # Session State Başlatma
     st.session_state.lesson_active = True
     st.session_state.reading_phase = False 
     st.session_state.accumulated_speaking_time = 0.0 
@@ -167,8 +201,11 @@ with st.sidebar:
     with c2: st.metric("Sub-Band", sub)
     
     st.caption(f"Completed Lessons: {user_data['lessons_completed']}")
-    st.info(f"🧠 Word Bank: {len(user_data['vocabulary_bank'])} words")
     
+    # Gelecek Ödevi Göster (Sidebar'da Hatırlatma)
+    if user_data.get("next_lesson_prep"):
+        st.info(f"📅 **Next Lesson Plan:**\nTopic: {user_data['next_lesson_prep']['topic']}")
+
     if st.session_state.get("lesson_active", False):
         st.divider()
         st.success(f"**Topic:** {st.session_state.topic}")
@@ -176,6 +213,10 @@ with st.sidebar:
         if st.session_state.target_vocab:
             st.markdown("**🆕 Target Words:**")
             st.write(", ".join(st.session_state.target_vocab))
+            
+        if st.session_state.get("review_vocab"):
+            st.markdown("**🔄 Review These:**")
+            st.write(", ".join(st.session_state.review_vocab))
             
         if not st.session_state.get("reading_phase", False):
             current = st.session_state.accumulated_speaking_time
@@ -185,7 +226,7 @@ with st.sidebar:
 
     st.divider()
     if st.button("RESET ALL DATA"):
-        save_data({"current_level": "A2", "lessons_completed": 0, "exam_scores": [], "vocabulary_bank": [], "next_mode": "ASSESSMENT"})
+        save_data({"current_level": "A2", "lessons_completed": 0, "exam_scores": [], "vocabulary_bank": [], "next_mode": "ASSESSMENT", "next_lesson_prep": None})
         st.rerun()
 
 # --- 5. ANA AKIŞ ---
@@ -194,7 +235,7 @@ if api_key:
     st.title("🗣️ AI Personal Coach")
 
     if not st.session_state.get("lesson_active", False):
-        st.markdown(f"### Welcome Pınar! Ready for **{user_data['current_level']}** ({determine_sub_level(user_data['current_level'], user_data['lessons_completed'])})?")
+        st.markdown(f"### Welcome Pınar! Ready for **{user_data['current_level']}**?")
         
         target_sec = st.slider("Target Speaking Time (Seconds)", 30, 300, 60, step=30)
         btn = "🚀 START LESSON" if user_data["next_mode"] != "EXAM" else "🔥 START EXAM"
@@ -205,7 +246,7 @@ if api_key:
                 st.rerun()
 
     else:
-        # FAZ 1: KONUŞMA
+        # FAZ 1: KONUŞMA (SPEAKING PHASE)
         if not st.session_state.get("reading_phase", False):
             for msg in st.session_state.messages:
                 if msg["role"] != "system":
@@ -225,7 +266,7 @@ if api_key:
                 current_spk = st.session_state.accumulated_speaking_time
                 target_spk = st.session_state.target_speaking_seconds
                 
-                if st.button("➡️ GO TO READING PART", use_container_width=True):
+                if st.button("➡️ GO TO WRITING/READING PART", use_container_width=True):
                     if user_data["next_mode"] != "ASSESSMENT" and current_spk < target_spk:
                         st.toast("Not enough speaking time!", icon="🚫")
                     else:
@@ -237,7 +278,7 @@ if api_key:
                             OUTPUT JSON FORMAT:
                             {{
                                 "text": "The passage text...",
-                                "questions": ["Q1", "Q2", "Q3"]
+                                "questions": ["Question 1", "Question 2", "Question 3"]
                             }}
                             """
                             try:
@@ -245,7 +286,7 @@ if api_key:
                                 content = strict_json_parse(res.choices[0].message.content)
                                 st.session_state.reading_content = content
                             except:
-                                st.session_state.reading_content = {"text": "Error generating text.", "questions": ["What is the topic?"]}
+                                st.session_state.reading_content = {"text": "Error.", "questions": ["Q1"]}
                         st.rerun()
 
             if audio:
@@ -255,26 +296,18 @@ if api_key:
                         try:
                             audio_bio = io.BytesIO(audio['bytes'])
                             audio_bio.name = "audio.webm"
-                            
-                            # 🔥 YENİ: WHISPER PROMPT AYARI (Context Injection)
-                            # Modele ne hakkında konuştuğunu söylüyoruz ki uydurmasın.
                             transcript = client.audio.transcriptions.create(
-                                model="whisper-1", 
-                                file=audio_bio, 
-                                language="en", 
-                                temperature=0.2, # Yaratıcılık çok düşük ama 0 değil (döngüyü kırmak için)
-                                prompt=f"The user is speaking English about {st.session_state.topic}. This is a language lesson."
+                                model="whisper-1", file=audio_bio, language="en", temperature=0.2,
+                                prompt=f"User speaking English about {st.session_state.topic}."
                             ).text
                             
-                            # --- 🚨 GÜÇLENDİRİLMİŞ FİLTRE ---
                             is_hallucination = False
                             for banned in BANNED_PHRASES:
                                 if banned.lower() in transcript.lower():
                                     is_hallucination = True; break
                             
-                            # Eğer çok kısaysa veya yasaklı kelime varsa
                             if is_hallucination or len(transcript.strip()) < 2:
-                                st.warning("Audio unclear. Please speak closer to the microphone.")
+                                st.warning("Audio unclear. Please try again.")
                             else:
                                 word_count = len(transcript.split())
                                 st.session_state.accumulated_speaking_time += word_count * 0.7
@@ -289,79 +322,130 @@ if api_key:
                                 tts.write_to_fp(audio_fp)
                                 st.session_state.last_audio_response = audio_fp.getvalue()
                                 st.rerun()
-                                
                         except Exception as e: 
-                            st.error(f"⚠️ AUDIO ERROR: {e}")
+                            st.error(f"Error: {e}")
 
-        # FAZ 2: OKUMA
+        # FAZ 2: YAZILI OKUMA SINAVI (WRITING/READING PHASE)
         else:
             st.markdown("### 📖 Reading & Comprehension")
             content = st.session_state.get("reading_content", {})
             st.info(content.get("text", ""))
-            
-            st.write("**Questions:**")
-            for i, q in enumerate(content.get("questions", [])):
-                st.markdown(f"**{i+1}.** {q}")
-            
             st.write("---")
-            st.write("👉 **Please record ONE audio answering all 3 questions.**")
             
-            c_read_mic, c_read_fin = st.columns([1, 4])
+            # --- FORM OLUŞTURMA (Yazılı Cevaplar İçin) ---
+            with st.form("reading_quiz_form"):
+                st.write("**Please answer the questions below (in English):**")
+                
+                answers = []
+                questions = content.get("questions", [])
+                
+                for i, q in enumerate(questions):
+                    # Her soru için bir text kutusu
+                    ans = st.text_input(f"{i+1}. {q}", key=f"q_{i}")
+                    answers.append(ans)
+                
+                submitted = st.form_submit_button("🏁 SUBMIT ANSWERS & FINISH LESSON")
             
-            with c_read_mic:
-                ans_audio = mic_recorder(start_prompt="🎤 ANSWER", stop_prompt="⏹️ SUBMIT", key="reader_mic")
-            
-            with c_read_fin:
-                if st.button("🏁 FINISH LESSON & GET FEEDBACK", type="primary", use_container_width=True):
-                    with st.spinner("Analyzing performance..."):
-                        analysis_prompt = """
-                        ANALYZE the entire session. PROVIDE REPORT IN JSON:
-                        {
-                            "score": (0-100),
-                            "learned_words": ["word1", "word2"],
-                            "pros": ["Good pronunciation", "Used target words"],
-                            "cons": ["Grammar error", "Hesitation"],
-                            "suggestions": ["Practice X", "Watch Y"],
-                            "level_recommendation": "Stay/Up"
-                        }
-                        """
-                        msgs = st.session_state.messages + [{"role": "system", "content": analysis_prompt}]
-                        try:
-                            res = client.chat.completions.create(model="gpt-4o", messages=msgs)
-                            rep = strict_json_parse(res.choices[0].message.content)
-                            if not rep: rep = {"score": 75, "pros": [], "cons": [], "suggestions": []}
-
-                            user_data["lessons_completed"] += 1
-                            if "learned_words" in rep: user_data["vocabulary_bank"].extend(rep["learned_words"])
-                            
-                            if user_data["lessons_completed"] % 5 == 0: user_data["next_mode"] = "EXAM"
-                            else: user_data["next_mode"] = "LESSON"
-                            
-                            save_data(user_data)
-                            
-                            st.balloons()
-                            st.markdown(f"## 📊 Score: {rep.get('score')}")
-                            c1, c2 = st.columns(2)
-                            with c1: st.success(f"**✅ Pros:**\n" + "\n".join([f"- {i}" for i in rep.get('pros', [])]))
-                            with c2: st.error(f"**🔻 Areas to Improve:**\n" + "\n".join([f"- {i}" for i in rep.get('cons', [])]))
-                            st.info(f"**💡 Suggestions:**\n" + "\n".join([f"- {i}" for i in rep.get('suggestions', [])]))
-                            st.session_state.lesson_active = False
-                        except Exception as e:
-                            st.error(f"Report Error: {e}")
-            
-            if ans_audio:
-                if "last_reading_bytes" not in st.session_state or ans_audio['bytes'] != st.session_state.last_reading_bytes:
-                    st.session_state.last_reading_bytes = ans_audio['bytes']
+            if submitted:
+                # Kullanıcı cevaplarını JSON formatında birleştir
+                user_answers_dict = {f"Q{i+1}": ans for i, ans in enumerate(answers)}
+                
+                with st.spinner("Grading your answers & Preparing Homework..."):
+                    # 1. ANALİZ + DOĞRU CEVAPLAR + ÖDEV
+                    analysis_prompt = f"""
+                    You are an English Teacher.
+                    
+                    TASK 1: Analyze the Speaking Session (Chat history) + Reading Answers.
+                    
+                    TASK 2: Check the Reading Answers against the text. 
+                    If the user's answer is WRONG, provide the CORRECT answer.
+                    
+                    TASK 3: Prepare the NEXT LESSON (Homework).
+                    Choose a NEW topic suitable for {user_data['current_level']} level.
+                    Choose 5 NEW target words for that topic.
+                    
+                    OUTPUT JSON FORMAT:
+                    {{
+                        "score": (0-100),
+                        "reading_feedback": [
+                            {{"question": "Q1 text", "user_answer": "...", "correct_answer": "...", "is_correct": true/false}},
+                            {{"question": "Q2 text", "user_answer": "...", "correct_answer": "...", "is_correct": true/false}},
+                            {{"question": "Q3 text", "user_answer": "...", "correct_answer": "...", "is_correct": true/false}}
+                        ],
+                        "learned_words": ["word1", "word2"],
+                        "pros": ["..."],
+                        "cons": ["..."],
+                        "suggestions": ["..."],
+                        "level_recommendation": "Stay/Up",
+                        "next_lesson_homework": {{
+                            "topic": "Name of next topic",
+                            "vocab": ["w1", "w2", "w3", "w4", "w5"]
+                        }}
+                    }}
+                    """
+                    
+                    # Kullanıcının yazılı cevaplarını mesaja ekle
+                    msgs = st.session_state.messages + [
+                        {"role": "user", "content": f"My Reading Answers: {json.dumps(user_answers_dict)}"},
+                        {"role": "system", "content": analysis_prompt}
+                    ]
+                    
                     try:
-                        audio_bio = io.BytesIO(ans_audio['bytes'])
-                        audio_bio.name = "audio.webm"
-                        transcript = client.audio.transcriptions.create(
-                            model="whisper-1", file=audio_bio, language="en", temperature=0
-                        ).text
-                        st.success(f"**Your Answers:** {transcript}")
-                        st.session_state.messages.append({"role": "user", "content": f"Reading answers: {transcript}"})
-                    except Exception as e: 
-                        st.error(f"⚠️ Reading Audio Error: {e}")
+                        res = client.chat.completions.create(model="gpt-4o", messages=msgs)
+                        rep = strict_json_parse(res.choices[0].message.content)
+                        if not rep: rep = {"score": 75, "pros": [], "cons": [], "next_lesson_homework": {"topic": "General", "vocab": []}}
+
+                        # Verileri Kaydet
+                        user_data["lessons_completed"] += 1
+                        if "learned_words" in rep: user_data["vocabulary_bank"].extend(rep["learned_words"])
+                        
+                        # Gelecek Ödevi Kaydet
+                        if "next_lesson_homework" in rep:
+                            user_data["next_lesson_prep"] = rep["next_lesson_homework"]
+                        
+                        # Seviye Modu
+                        if user_data["lessons_completed"] % 5 == 0: user_data["next_mode"] = "EXAM"
+                        else: user_data["next_mode"] = "LESSON"
+                        
+                        save_data(user_data)
+                        
+                        # --- SONUÇ EKRANI ---
+                        st.balloons()
+                        st.markdown(f"## 📊 Final Score: {rep.get('score')}")
+                        
+                        # 1. Reading Sonuçları (Doğru/Yanlış Tablosu)
+                        st.subheader("📝 Reading Results")
+                        for feedback in rep.get("reading_feedback", []):
+                            color = "green" if feedback["is_correct"] else "red"
+                            emoji = "✅" if feedback["is_correct"] else "❌"
+                            with st.expander(f"{emoji} {feedback['question']}", expanded=True):
+                                st.write(f"**You said:** {feedback['user_answer']}")
+                                if not feedback["is_correct"]:
+                                    st.markdown(f":{color}[**Correct Answer:** {feedback['correct_answer']}]")
+                                else:
+                                    st.caption("Correct!")
+
+                        # 2. Genel Feedback
+                        st.divider()
+                        c1, c2 = st.columns(2)
+                        with c1: 
+                            st.success(f"**✅ Pros:**\n" + "\n".join([f"- {i}" for i in rep.get('pros', [])]))
+                        with c2: 
+                            st.error(f"**🔻 Needs Work:**\n" + "\n".join([f"- {i}" for i in rep.get('cons', [])]))
+                        
+                        # 3. Ödev Kartı (HOMEWORK CARD)
+                        st.divider()
+                        st.info(f"### 📅 NEXT LESSON HOMEWORK")
+                        hw = rep.get("next_lesson_homework", {})
+                        st.write(f"**Topic:** {hw.get('topic', 'General')}")
+                        st.write("**Study these words:**")
+                        st.code(", ".join(hw.get('vocab', [])))
+                        st.caption("These will be automatically loaded when you start the next lesson!")
+
+                        st.session_state.lesson_active = False
+
+                    except Exception as e:
+                        st.error(f"Report Error: {e}")
                     
 else:
     st.warning("Enter API Key")
