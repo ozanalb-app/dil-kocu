@@ -10,14 +10,14 @@ import time
 import re
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v7.1", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v8", page_icon="🎓", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- HALÜSİNASYON FİLTRESİ ---
 BANNED_PHRASES = [
     "Hi, how are you?", "Good to see you", "Thank you", "Thanks for watching", 
     "Copyright", "Subscribe", "Amara.org", "Watch this video", "You", 
-    "I could not think of anything", "Silence", "Bye"
+    "I could not think of anything", "Silence", "Bye", "MBC", "Al Jazeera"
 ]
 
 # --- KONU HAVUZU ---
@@ -99,33 +99,39 @@ def determine_sub_level(level, lessons_completed):
 user_data = load_data()
 
 # --- 3. DERS MANTIĞI ---
-def start_lesson_logic(client, level, mode, target_speaking_seconds):
+def start_lesson_logic(client, level, mode, target_speaking_minutes):
     sub_level = determine_sub_level(level, user_data["lessons_completed"])
     full_level_desc = f"{level} ({sub_level})"
     
+    # 1. Ödev Kontrolü (Hata düzeltmesi: Veriyi hemen silmiyoruz)
     assigned_topic = None
     assigned_vocab = []
     
-    # Ödev Kontrolü
     if mode == "LESSON" and user_data.get("next_lesson_prep"):
         plan = user_data["next_lesson_prep"]
         assigned_topic = plan.get("topic")
         assigned_vocab = plan.get("vocab", [])
-        # Planı tüketiyoruz
-        user_data["next_lesson_prep"] = None 
-        save_data(user_data)
-        st.toast(f"📅 Planned Lesson Loaded: {assigned_topic}", icon="check")
+        st.toast(f"📅 Planned Topic: {assigned_topic}", icon="check")
 
+    # 2. Konu ve Rol Belirleme
     if mode == "EXAM":
         topic = random.choice(TOPIC_POOL[level])
-        system_role = f"ACT AS: Strict Examiner. LEVEL: {full_level_desc}. TOPIC: {topic}. GOAL: Test user. RESPONSE STYLE: Short questions."
+        system_role = f"ACT AS: Strict Examiner. LEVEL: {full_level_desc}. TOPIC: {topic}. GOAL: Test user. RESPONSE STYLE: Short questions. ALWAYS ask a question."
     elif mode == "ASSESSMENT":
         topic = "Level Assessment"
-        system_role = "ACT AS: Examiner. GOAL: Determine level. Ask 3 questions."
+        system_role = "ACT AS: Examiner. GOAL: Determine level. Ask 3 questions. ALWAYS ask a question."
     else:
         topic = assigned_topic if assigned_topic else random.choice(TOPIC_POOL.get(level, ["General"]))
-        system_role = f"ACT AS: Helpful Coach. LEVEL: {full_level_desc}. TOPIC: {topic}. RESPONSE STYLE: Keep answers UNDER 2 SENTENCES."
+        # --- 🔥 KRİTİK GÜNCELLEME: SORU SORMA ZORUNLULUĞU ---
+        system_role = f"""
+        ACT AS: Helpful English Coach. 
+        LEVEL: {full_level_desc}. 
+        TOPIC: {topic}. 
+        RESPONSE STYLE: Keep answers UNDER 2 SENTENCES. 
+        CRITICAL RULE: You MUST ALWAYS end your response with a related FOLLOW-UP QUESTION to keep the conversation going. Never just say 'Good job'.
+        """
 
+    # 3. Kelime Seçimi
     target_vocab = []
     review_vocab = []
     
@@ -148,10 +154,11 @@ def start_lesson_logic(client, level, mode, target_speaking_seconds):
             if past_candidates:
                 review_vocab = random.sample(past_candidates, min(3, len(past_candidates)))
 
+    # Session State Başlatma
     st.session_state.lesson_active = True
     st.session_state.reading_phase = False 
     st.session_state.accumulated_speaking_time = 0.0 
-    st.session_state.target_speaking_seconds = target_speaking_seconds
+    st.session_state.target_speaking_seconds = target_speaking_minutes * 60 # Dakikayı saniyeye çevir
     st.session_state.target_vocab = target_vocab
     st.session_state.review_vocab = review_vocab
     st.session_state.topic = topic
@@ -163,6 +170,7 @@ def start_lesson_logic(client, level, mode, target_speaking_seconds):
     final_prompt = f"{system_role}\n{intro_instr}\nCONTEXT: {vocab_instr}\nIf user uses a target word, PRAISE briefly."
     st.session_state.messages = [{"role": "system", "content": final_prompt}]
     
+    # İlk Mesajı Oluştur (Hata olursa burada yakalarız)
     try:
         first_res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
         first_msg = first_res.choices[0].message.content
@@ -172,8 +180,16 @@ def start_lesson_logic(client, level, mode, target_speaking_seconds):
         audio_fp = io.BytesIO()
         tts.write_to_fp(audio_fp)
         st.session_state.last_audio_response = audio_fp.getvalue()
+        
+        # --- 🔥 HATA DÜZELTME: ÖDEV VERİSİNİ ŞİMDİ SİLİYORUZ ---
+        # Sadece ders başarıyla başladıysa ödevi "yapıldı" sayıp siliyoruz.
+        if mode == "LESSON" and user_data.get("next_lesson_prep"):
+            user_data["next_lesson_prep"] = None
+            save_data(user_data)
+            
     except Exception as e:
-        st.error(f"Başlatma hatası: {e}")
+        st.error(f"Ders başlatılamadı (İnternet veya API hatası): {e}")
+        st.session_state.lesson_active = False # Başlamadı say
 
 # --- 4. ARAYÜZ ---
 with st.sidebar:
@@ -192,7 +208,7 @@ with st.sidebar:
     st.caption(f"Completed Lessons: {user_data['lessons_completed']}")
     
     if user_data.get("next_lesson_prep"):
-        st.info(f"📅 **Next Lesson Plan:**\nTopic: {user_data['next_lesson_prep']['topic']}")
+        st.info(f"📅 **Homework Topic:**\n{user_data['next_lesson_prep']['topic']}")
 
     if st.session_state.get("lesson_active", False):
         st.divider()
@@ -202,15 +218,18 @@ with st.sidebar:
             st.markdown("**🆕 Target Words:**")
             st.write(", ".join(st.session_state.target_vocab))
             
-        if st.session_state.get("review_vocab"):
-            st.markdown("**🔄 Review These:**")
-            st.write(", ".join(st.session_state.review_vocab))
-            
         if not st.session_state.get("reading_phase", False):
-            current = st.session_state.accumulated_speaking_time
-            target = st.session_state.target_speaking_seconds
-            prog = min(current / target, 1.0)
-            st.progress(prog, text=f"Speaking: {int(current)}/{int(target)}s")
+            # DAKİKA GÖSTERİMİ
+            current_sec = st.session_state.accumulated_speaking_time
+            target_sec = st.session_state.target_speaking_seconds
+            
+            prog = min(current_sec / target_sec, 1.0)
+            
+            # Format: 2m 30s
+            curr_str = f"{int(current_sec // 60)}m {int(current_sec % 60)}s"
+            targ_str = f"{int(target_sec // 60)}m {int(target_sec % 60)}s"
+            
+            st.progress(prog, text=f"Speaking Progress: {curr_str} / {targ_str}")
 
     st.divider()
     if st.button("RESET ALL DATA"):
@@ -225,20 +244,22 @@ if api_key:
     if not st.session_state.get("lesson_active", False):
         st.markdown(f"### Welcome Pınar! Ready for **{user_data['current_level']}**?")
         
-        # Eğer ödev varsa yukarıda gösteriyoruz
         if user_data.get("next_lesson_prep"):
-            st.success(f"🎯 **Ready for:** {user_data['next_lesson_prep']['topic']}")
+            st.success(f"🎯 **Planned Lesson:** {user_data['next_lesson_prep']['topic']}")
             
-        target_sec = st.slider("Target Speaking Time (Seconds)", 30, 300, 60, step=30)
+        # --- 🔥 DAKİKA SLIDER ---
+        target_mins = st.slider("Target Speaking Time (Minutes)", 0.5, 30.0, 1.0, step=0.5)
+        st.caption(f"You need to speak for roughly {target_mins} minutes before moving to Reading.")
+        
         btn = "🚀 START LESSON" if user_data["next_mode"] != "EXAM" else "🔥 START EXAM"
         
         if st.button(btn, type="primary", use_container_width=True):
             with st.spinner("Preparing curriculum..."):
-                start_lesson_logic(client, user_data["current_level"], user_data["next_mode"], target_sec)
+                start_lesson_logic(client, user_data["current_level"], user_data["next_mode"], target_mins)
                 st.rerun()
 
     else:
-        # FAZ 1: KONUŞMA (BLIND LISTENING MODE)
+        # FAZ 1: KONUŞMA (BLIND MODE)
         if not st.session_state.get("reading_phase", False):
             
             chat_container = st.container()
@@ -272,9 +293,11 @@ if api_key:
                 current_spk = st.session_state.accumulated_speaking_time
                 target_spk = st.session_state.target_speaking_seconds
                 
+                # Kalan Süre Kontrolü
                 if st.button("➡️ GO TO WRITING/READING PART", use_container_width=True):
                     if user_data["next_mode"] != "ASSESSMENT" and current_spk < target_spk:
-                        st.toast("Not enough speaking time!", icon="🚫")
+                        missing = target_spk - current_spk
+                        st.toast(f"Keep speaking! {int(missing//60)}m {int(missing%60)}s left.", icon="⏳")
                     else:
                         st.session_state.reading_phase = True
                         with st.spinner("Generating reading task..."):
@@ -412,14 +435,12 @@ if api_key:
 
                         st.session_state.lesson_active = False
                         
-                        # --- 🔥 SONRAKİ DERSE GEÇ BUTONU ---
+                        # --- SONRAKİ DERSE GEÇ ---
                         if st.button("🚀 START NEXT LESSON NOW", type="primary", use_container_width=True):
-                            # Session temizliği
                             st.session_state.messages = []
                             st.session_state.reading_phase = False
                             st.session_state.reading_content = {}
                             st.session_state.accumulated_speaking_time = 0
-                            # Ekranı yenile (Bu sefer 'next_lesson_prep' dolu olduğu için oradan başlayacak)
                             st.rerun()
 
                     except Exception as e:
