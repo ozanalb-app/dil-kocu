@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v23", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v24", page_icon="🛡️", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- HALÜSİNASYON FİLTRESİ ---
@@ -101,7 +101,6 @@ def determine_sub_level(level, lessons_completed):
     elif cycle < 7: return "Medium"
     else: return "High"
 
-# 🔥 YENİ: GPT İLE CANLI KELİME ÜRETİMİ (HAVUZDAN DEĞİL)
 def generate_dynamic_vocab(client, scenario, level):
     prompt = f"""
     Generate 5 English vocabulary words suitable for CEFR level {level}.
@@ -114,9 +113,9 @@ def generate_dynamic_vocab(client, scenario, level):
         if isinstance(words, list) and len(words) > 0:
             return words[:5]
         else:
-            return ["hello", "please", "thank you", "help", "goodbye"] # Fallback
+            return ["hello", "help", "please", "thank you", "question"]
     except:
-        return ["hello", "please", "thank you", "help", "goodbye"] # Fallback
+        return ["hello", "help", "please", "thank you", "question"]
 
 user_data = load_data()
 
@@ -127,14 +126,15 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes):
     
     assigned_scenario = None
     
-    # 1. Ödev Kontrolü
+    # 1. Ödev Kontrolü ve Temizliği
     if mode == "LESSON" and user_data.get("next_lesson_prep"):
         plan = user_data["next_lesson_prep"]
         assigned_scenario = plan.get("scenario", plan.get("topic"))
-        # Ödevi sil
+        
+        # Ödevi hemen tüket ki bir sonraki sefer gelmesin
         user_data["next_lesson_prep"] = None 
         save_data(user_data)
-        st.toast(f"📅 Planned Scenario: {assigned_scenario}", icon="✅")
+        st.toast(f"📅 Loaded Plan: {assigned_scenario}", icon="✅")
 
     # 2. Senaryo Seçimi
     if mode == "EXAM":
@@ -153,24 +153,34 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes):
                 user_data["completed_scenarios"] = []
                 save_data(user_data)
                 available = SCENARIO_POOL
+            
+            # Rastgele seç ama eskisiyle aynı olmasın
             scenario = random.choice(available)
+            if len(user_data.get("lesson_history", [])) > 0:
+                last_topic = user_data["lesson_history"][-1].get("topic")
+                while scenario == last_topic and len(available) > 1:
+                    scenario = random.choice(available)
+
             if scenario not in user_data["completed_scenarios"]:
                 user_data["completed_scenarios"].append(scenario)
                 save_data(user_data)
 
+        # 🔥 ZORUNLU SORU KURALI (MANDATORY QUESTION)
         system_role = f"""
         ACT AS A ROLEPLAYER for: '{scenario}'. 
         LEVEL: {full_level_desc}.
-        CRITICAL RULE: 
-        1. Keep responses VERY SHORT (Max 25 words).
-        2. NEVER say "Thank you for sharing" or "Good job".
-        3. ALWAYS end with a relevant follow-up question to keep the roleplay going.
+        
+        CRITICAL RULES: 
+        1. Keep responses SHORT (Max 25 words).
+        2. NEVER say "Thank you for sharing", "Good job", or summarize.
+        3. MANDATORY: EVERY SINGLE RESPONSE MUST END WITH A DIRECT QUESTION TO THE USER.
+        4. If the user answers, immediately ask the next logical question for this scenario.
         """
 
-    # 3. Dinamik Kelime Üretimi
+    # 3. Kelime Üretimi
     target_vocab = generate_dynamic_vocab(client, scenario, level)
 
-    # State Reset
+    # State Reset (Hard)
     st.session_state.lesson_active = True
     st.session_state.reading_phase = False
     st.session_state.reading_completed = False
@@ -186,7 +196,7 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes):
     context_msg = f"🎭 **SCENARIO:** {scenario}\n🔑 **WORDS:** {', '.join(target_vocab)}"
     st.session_state.display_messages.append({"role": "info", "content": context_msg})
 
-    intro_prompt = f"{system_role}\nStart the roleplay now with your first line."
+    intro_prompt = f"{system_role}\nStart the roleplay now with your first line as the character. ASK A QUESTION."
     st.session_state.messages = [{"role": "system", "content": intro_prompt}]
     
     try:
@@ -274,7 +284,6 @@ if api_key:
         c1, c2 = st.columns(2)
         with c1:
             if st.button("🔄 New Card"):
-                # Rastgele kelime üret (Hızlı pratik için)
                 prompt = f"Give me one random English word (Level {user_data['current_level']}). Just the word."
                 res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":prompt}])
                 word = res.choices[0].message.content.strip()
@@ -328,20 +337,24 @@ if api_key:
             if st.session_state.get("lesson_active", False) and not st.session_state.get("reading_phase", False):
                 curr = st.session_state.accumulated_speaking_time
                 targ = st.session_state.target_speaking_seconds
+                
+                # Progress Bar
+                prog = min(curr / targ, 1.0) if targ > 0 else 0
                 c_min = int(curr // 60)
                 c_sec = int(curr % 60)
                 t_min = int(targ // 60)
                 t_sec = int(targ % 60)
-                
-                # Progress bar hesabı
-                val = min(curr / targ, 1.0) if targ > 0 else 0
-                st.progress(val, text=f"Time: {c_min}m {c_sec}s / {t_min}m {t_sec}s")
+                st.progress(prog, text=f"Time: {c_min}m {c_sec}s / {t_min}m {t_sec}s")
 
         if not st.session_state.get("lesson_active", False):
+            # Eğer ödev varsa göster, yoksa random geleceğini söyle
             if user_data.get("next_lesson_prep"):
                 prep = user_data.get("next_lesson_prep", {})
-                sc_name = prep.get("scenario", prep.get("topic", "Unknown"))
-                st.success(f"🎯 Next: {sc_name}")
+                sc_name = prep.get("scenario", prep.get("topic", "Surprise Scenario"))
+                st.success(f"🎯 **Next Mission:** {sc_name}")
+            else:
+                st.info("🎲 Ready for a random scenario?")
+                
             mins = st.slider("Duration (Mins)", 0.5, 30.0, 1.0, step=0.5)
             if st.button("🚀 START SCENARIO"):
                 start_lesson_logic(client, user_data["current_level"], user_data["next_mode"], mins)
@@ -367,8 +380,10 @@ if api_key:
                                     st.write("🔊 **Listening...**")
                                     with st.expander("🇬🇧 Text"):
                                         content = msg["content"]
+                                        # Hedef kelimeleri mavi yap
                                         for w in st.session_state.target_vocab:
-                                            content = re.sub(f"(?i)\\b{w}\\b", f"**:{'blue'}[{w.upper()}]**", content)
+                                            # Basit regex replace
+                                            content = re.sub(f"(?i)\\b{re.escape(w)}\\b", f"**:{'blue'}[{w.upper()}]**", content)
                                         st.markdown(content)
                                     with st.expander("🇹🇷 Türkçesi"):
                                         st.info(msg.get("tr_content", "..."))
@@ -393,15 +408,13 @@ if api_key:
                     curr = st.session_state.accumulated_speaking_time
                     targ = st.session_state.target_speaking_seconds
                     
-                    time_is_up = (curr >= targ)
+                    time_up = (curr >= targ)
+                    # Assessment modunda süre sınırı olmaz
+                    can_proceed = time_up or user_data["next_mode"] == "ASSESSMENT"
                     
-                    # 🔥 KİLİT MANTIĞI: BUTON DISABLE OLACAK
-                    # Eğer Assessment modundaysak süreye bakma
-                    can_proceed = time_is_up or user_data["next_mode"] == "ASSESSMENT"
+                    btn_text = "➡️ UNLOCK READING" if not can_proceed else "➡️ GO TO READING PHASE"
                     
-                    btn_label = "➡️ UNLOCK READING" if not can_proceed else "➡️ GO TO READING PHASE"
-                    
-                    if st.button(btn_label, use_container_width=True, disabled=not can_proceed):
+                    if st.button(btn_text, use_container_width=True, disabled=not can_proceed):
                         st.session_state.reading_phase = True
                         with st.spinner("Generating reading task..."):
                             prompt = f"Create A2/B1 reading text about the scenario: {st.session_state.scenario}. Then 3 questions. JSON: {{'text':'...','questions':['Q1','Q2','Q3']}}"
@@ -480,7 +493,8 @@ if api_key:
                     
                     with st.form("read_form"):
                         ans_list = []
-                        for i, q in enumerate(content.get("questions", [])):
+                        questions = content.get("questions", ["Q1", "Q2", "Q3"])
+                        for i, q in enumerate(questions):
                             ans_list.append(st.text_input(f"{i+1}. {q}"))
                         submitted = st.form_submit_button("🏁 FINISH")
                     
@@ -501,30 +515,37 @@ if api_key:
                             user_json = json.dumps({f"Q{i}": a for i,a in enumerate(ans_list)})
                             msgs = st.session_state.messages + [{"role":"user","content":f"Reading Answers: {user_json}"}, {"role":"system","content":prompt}]
                             
-                            res = client.chat.completions.create(model="gpt-4o", messages=msgs)
-                            rep = strict_json_parse(res.choices[0].message.content)
-                            if not rep: rep = {"score": 70} 
+                            try:
+                                res = client.chat.completions.create(model="gpt-4o", messages=msgs)
+                                rep = strict_json_parse(res.choices[0].message.content)
+                                if not rep: rep = {"score": 70} 
 
-                            user_data["lessons_completed"] += 1
-                            if "next_lesson_homework" in rep: user_data["next_lesson_prep"] = rep["next_lesson_homework"]
-                            
-                            hist = {
-                                "date": datetime.now().strftime("%Y-%m-%d"),
-                                "topic": st.session_state.scenario,
-                                "score": rep.get("score"),
-                                "speaking_score": rep.get("speaking_score"),
-                                "reading_score": rep.get("reading_score"),
-                                "grammar_topics": rep.get("grammar_topics", []),
-                                "words": st.session_state.target_vocab,
-                                "feedback_pros": rep.get("pros", []),
-                                "feedback_cons": rep.get("cons", [])
-                            }
-                            user_data["lesson_history"].append(hist)
-                            save_data(user_data)
-                            
-                            st.session_state.final_report = rep
-                            st.session_state.reading_completed = True
-                            st.rerun()
+                                user_data["lessons_completed"] += 1
+                                # 🔥 Modu daima LESSON'a çevir (Assessment bitince çık)
+                                user_data["next_mode"] = "LESSON"
+                                
+                                if "next_lesson_homework" in rep: 
+                                    user_data["next_lesson_prep"] = rep["next_lesson_homework"]
+                                
+                                hist = {
+                                    "date": datetime.now().strftime("%Y-%m-%d"),
+                                    "topic": st.session_state.scenario,
+                                    "score": rep.get("score"),
+                                    "speaking_score": rep.get("speaking_score"),
+                                    "reading_score": rep.get("reading_score"),
+                                    "grammar_topics": rep.get("grammar_topics", []),
+                                    "words": st.session_state.target_vocab,
+                                    "feedback_pros": rep.get("pros", []),
+                                    "feedback_cons": rep.get("cons", [])
+                                }
+                                user_data["lesson_history"].append(hist)
+                                save_data(user_data)
+                                
+                                st.session_state.final_report = rep
+                                st.session_state.reading_completed = True
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Analysis Error: {e}")
                 
                 else:
                     rep = st.session_state.final_report
@@ -547,7 +568,9 @@ if api_key:
                     next_sc = rep.get('next_lesson_homework', {}).get('scenario', 'Next Level')
                     st.info(f"**Next:** {next_sc}")
                     
-                    if st.button("🚀 START NEXT"):
+                    # 🔥 BURASI DEĞİŞTİ: START NEXT HARD RESET YAPAR
+                    if st.button("🚀 START NEXT LESSON (Hard Reset)"):
+                        st.session_state.lesson_active = False 
                         st.session_state.messages = []
                         st.session_state.display_messages = []
                         st.session_state.reading_phase = False
