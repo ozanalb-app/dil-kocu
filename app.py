@@ -185,7 +185,7 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, speed_slow)
         plan = user_data["next_lesson_prep"]
         assigned_topic = plan.get("topic")
         assigned_vocab = plan.get("vocab", [])
-        st.toast(f"📅 Planned Topic: {assigned_topic}", icon="check")
+        st.toast(f"📅 Planned Topic: {assigned_topic}", icon="✅")
 
     # 2. Konu Seçimi
     if mode == "EXAM":
@@ -574,3 +574,4 @@ if api_key:
                     
 else:
     st.warning("Enter API Key")
+
