@@ -10,7 +10,7 @@ import time
 import re
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v6", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v7 (Blind Mode)", page_icon="🎧", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- HALÜSİNASYON FİLTRESİ ---
@@ -63,7 +63,6 @@ TOPIC_POOL = {
 
 # --- 2. YARDIMCI FONKSİYONLAR ---
 def load_data():
-    # 'next_lesson_prep' alanı eklendi (Ödev sistemi için)
     if not os.path.exists(DATA_FILE):
         return {
             "current_level": "A2", 
@@ -75,9 +74,7 @@ def load_data():
         }
     with open(DATA_FILE, "r") as f:
         data = json.load(f)
-        # Eski veri dosyalarında bu alan yoksa hata vermesin diye kontrol
-        if "next_lesson_prep" not in data:
-            data["next_lesson_prep"] = None
+        if "next_lesson_prep" not in data: data["next_lesson_prep"] = None
         return data
 
 def save_data(data):
@@ -106,8 +103,6 @@ def start_lesson_logic(client, level, mode, target_speaking_seconds):
     sub_level = determine_sub_level(level, user_data["lessons_completed"])
     full_level_desc = f"{level} ({sub_level})"
     
-    # --- 1. ÖDEV KONTROLÜ (HOMEWORK CHECK) ---
-    # Eğer önceki dersten kalan bir "Gelecek Ders Planı" varsa, onu kullan.
     assigned_topic = None
     assigned_vocab = []
     
@@ -115,12 +110,10 @@ def start_lesson_logic(client, level, mode, target_speaking_seconds):
         plan = user_data["next_lesson_prep"]
         assigned_topic = plan.get("topic")
         assigned_vocab = plan.get("vocab", [])
-        # Planı kullandık, artık silebiliriz (ki sonsuza kadar aynı ders kalmasın)
         user_data["next_lesson_prep"] = None 
         save_data(user_data)
         st.toast(f"📅 Planned Lesson Loaded: {assigned_topic}", icon="check")
 
-    # --- 2. KONU VE ROL ---
     if mode == "EXAM":
         topic = random.choice(TOPIC_POOL[level])
         system_role = f"ACT AS: Strict Examiner. LEVEL: {full_level_desc}. TOPIC: {topic}. GOAL: Test user. RESPONSE STYLE: Short questions."
@@ -128,20 +121,16 @@ def start_lesson_logic(client, level, mode, target_speaking_seconds):
         topic = "Level Assessment"
         system_role = "ACT AS: Examiner. GOAL: Determine level. Ask 3 questions."
     else:
-        # Eğer ödev varsa onu kullan, yoksa rastgele seç
         topic = assigned_topic if assigned_topic else random.choice(TOPIC_POOL.get(level, ["General"]))
         system_role = f"ACT AS: Helpful Coach. LEVEL: {full_level_desc}. TOPIC: {topic}. RESPONSE STYLE: Keep answers UNDER 2 SENTENCES."
 
-    # --- 3. KELİME SEÇİMİ ---
     target_vocab = []
     review_vocab = []
     
     if mode == "LESSON":
-        # Eğer ödev varsa kelimeleri oradan al
         if assigned_vocab:
             target_vocab = assigned_vocab
         else:
-            # Ödev yoksa normal mantıkla seç
             full_vocab_list = ["happy", "travel", "friend", "time", "weather", "family", "weekend", "food", "city", "music"]
             if level == "B1": full_vocab_list = ["opinion", "suggest", "experience", "prefer", "describe", "recently", "challenge", "career", "habit", "culture"]
             elif level == "B2": full_vocab_list = ["perspective", "imply", "consequence", "debate", "theory", "significant", "approach", "justify", "complex", "adapt"]
@@ -151,14 +140,12 @@ def start_lesson_logic(client, level, mode, target_speaking_seconds):
             pool = unknown_words if len(unknown_words) >= 5 else full_vocab_list
             target_vocab = random.sample(pool, min(5, len(pool)))
 
-        # Spaced Repetition (Eski kelimeler)
         learned_set = set(user_data.get("vocabulary_bank", []))
         if learned_set:
             past_candidates = [w for w in list(learned_set) if w not in target_vocab]
             if past_candidates:
                 review_vocab = random.sample(past_candidates, min(3, len(past_candidates)))
 
-    # Session State Başlatma
     st.session_state.lesson_active = True
     st.session_state.reading_phase = False 
     st.session_state.accumulated_speaking_time = 0.0 
@@ -202,7 +189,6 @@ with st.sidebar:
     
     st.caption(f"Completed Lessons: {user_data['lessons_completed']}")
     
-    # Gelecek Ödevi Göster (Sidebar'da Hatırlatma)
     if user_data.get("next_lesson_prep"):
         st.info(f"📅 **Next Lesson Plan:**\nTopic: {user_data['next_lesson_prep']['topic']}")
 
@@ -232,27 +218,48 @@ with st.sidebar:
 # --- 5. ANA AKIŞ ---
 if api_key:
     client = OpenAI(api_key=api_key)
-    st.title("🗣️ AI Personal Coach")
+    st.title("🗣️ AI Personal Coach (Blind Mode)")
 
     if not st.session_state.get("lesson_active", False):
         st.markdown(f"### Welcome Pınar! Ready for **{user_data['current_level']}**?")
-        
         target_sec = st.slider("Target Speaking Time (Seconds)", 30, 300, 60, step=30)
         btn = "🚀 START LESSON" if user_data["next_mode"] != "EXAM" else "🔥 START EXAM"
-        
         if st.button(btn, type="primary", use_container_width=True):
             with st.spinner("Preparing curriculum..."):
                 start_lesson_logic(client, user_data["current_level"], user_data["next_mode"], target_sec)
                 st.rerun()
 
     else:
-        # FAZ 1: KONUŞMA (SPEAKING PHASE)
+        # FAZ 1: KONUŞMA (BLIND LISTENING MODE)
         if not st.session_state.get("reading_phase", False):
-            for msg in st.session_state.messages:
-                if msg["role"] != "system":
-                    with st.chat_message(msg["role"], avatar="🤖" if msg["role"]=="assistant" else "👤"):
-                        st.write(msg["content"])
             
+            # --- 🔥 BLIND MODE GÖSTERİM MANTIĞI ---
+            # Mesajları döngüye sokuyoruz.
+            # Eğer mesaj "Assistant"ın SON mesajı ise -> GİZLE.
+            # Değilse -> GÖSTER.
+            
+            chat_container = st.container()
+            with chat_container:
+                messages_len = len(st.session_state.messages)
+                for i, msg in enumerate(st.session_state.messages):
+                    if msg["role"] != "system":
+                        is_last_message = (i == messages_len - 1)
+                        is_assistant = (msg["role"] == "assistant")
+
+                        # Eğer son mesaj asistanınsa -> GİZLE (Kör Modu)
+                        if is_last_message and is_assistant:
+                            with st.chat_message("assistant", avatar="🤖"):
+                                st.write("🔊 **Dinleme Modu Aktif...** (Cevabı duymak için oynatın)")
+                                with st.expander("👀 Duyduğunu anlayamadın mı? Metni görmek için tıkla."):
+                                    st.write(msg["content"])
+                        
+                        # Diğer tüm mesajları normal göster
+                        else:
+                            avatar = "🤖" if msg["role"]=="assistant" else "👤"
+                            with st.chat_message(msg["role"], avatar=avatar):
+                                st.write(msg["content"])
+            
+            # Ses Oynatıcı (Metnin altında)
             if "last_audio_response" in st.session_state and st.session_state.last_audio_response:
                 st.audio(st.session_state.last_audio_response, format="audio/mp3", autoplay=True)
 
@@ -296,9 +303,10 @@ if api_key:
                         try:
                             audio_bio = io.BytesIO(audio['bytes'])
                             audio_bio.name = "audio.webm"
+                            
                             transcript = client.audio.transcriptions.create(
                                 model="whisper-1", file=audio_bio, language="en", temperature=0.2,
-                                prompt=f"User speaking English about {st.session_state.topic}."
+                                prompt=f"The user is speaking English about {st.session_state.topic}."
                             ).text
                             
                             is_hallucination = False
@@ -323,124 +331,86 @@ if api_key:
                                 st.session_state.last_audio_response = audio_fp.getvalue()
                                 st.rerun()
                         except Exception as e: 
-                            st.error(f"Error: {e}")
+                            st.error(f"⚠️ AUDIO ERROR: {e}")
 
-        # FAZ 2: YAZILI OKUMA SINAVI (WRITING/READING PHASE)
+        # FAZ 2: YAZILI OKUMA SINAVI
         else:
             st.markdown("### 📖 Reading & Comprehension")
             content = st.session_state.get("reading_content", {})
             st.info(content.get("text", ""))
             st.write("---")
             
-            # --- FORM OLUŞTURMA (Yazılı Cevaplar İçin) ---
             with st.form("reading_quiz_form"):
                 st.write("**Please answer the questions below (in English):**")
-                
                 answers = []
                 questions = content.get("questions", [])
-                
                 for i, q in enumerate(questions):
-                    # Her soru için bir text kutusu
                     ans = st.text_input(f"{i+1}. {q}", key=f"q_{i}")
                     answers.append(ans)
-                
                 submitted = st.form_submit_button("🏁 SUBMIT ANSWERS & FINISH LESSON")
             
             if submitted:
-                # Kullanıcı cevaplarını JSON formatında birleştir
                 user_answers_dict = {f"Q{i+1}": ans for i, ans in enumerate(answers)}
-                
-                with st.spinner("Grading your answers & Preparing Homework..."):
-                    # 1. ANALİZ + DOĞRU CEVAPLAR + ÖDEV
+                with st.spinner("Grading & Preparing Homework..."):
                     analysis_prompt = f"""
                     You are an English Teacher.
-                    
-                    TASK 1: Analyze the Speaking Session (Chat history) + Reading Answers.
-                    
-                    TASK 2: Check the Reading Answers against the text. 
-                    If the user's answer is WRONG, provide the CORRECT answer.
-                    
-                    TASK 3: Prepare the NEXT LESSON (Homework).
-                    Choose a NEW topic suitable for {user_data['current_level']} level.
-                    Choose 5 NEW target words for that topic.
-                    
-                    OUTPUT JSON FORMAT:
+                    TASK 1: Analyze Speaking + Reading.
+                    TASK 2: Check Reading Answers. If WRONG, provide CORRECT answer.
+                    TASK 3: Prepare NEXT LESSON (Homework).
+                    OUTPUT JSON:
                     {{
                         "score": (0-100),
                         "reading_feedback": [
-                            {{"question": "Q1 text", "user_answer": "...", "correct_answer": "...", "is_correct": true/false}},
-                            {{"question": "Q2 text", "user_answer": "...", "correct_answer": "...", "is_correct": true/false}},
-                            {{"question": "Q3 text", "user_answer": "...", "correct_answer": "...", "is_correct": true/false}}
+                            {{"question": "Q1", "user_answer": "...", "correct_answer": "...", "is_correct": true/false}},
+                            {{"question": "Q2", "user_answer": "...", "correct_answer": "...", "is_correct": true/false}},
+                            {{"question": "Q3", "user_answer": "...", "correct_answer": "...", "is_correct": true/false}}
                         ],
-                        "learned_words": ["word1", "word2"],
-                        "pros": ["..."],
-                        "cons": ["..."],
-                        "suggestions": ["..."],
+                        "learned_words": [],
+                        "pros": [], "cons": [], "suggestions": [],
                         "level_recommendation": "Stay/Up",
-                        "next_lesson_homework": {{
-                            "topic": "Name of next topic",
-                            "vocab": ["w1", "w2", "w3", "w4", "w5"]
-                        }}
+                        "next_lesson_homework": {{ "topic": "...", "vocab": ["..."] }}
                     }}
                     """
-                    
-                    # Kullanıcının yazılı cevaplarını mesaja ekle
                     msgs = st.session_state.messages + [
-                        {"role": "user", "content": f"My Reading Answers: {json.dumps(user_answers_dict)}"},
+                        {"role": "user", "content": f"Reading Answers: {json.dumps(user_answers_dict)}"},
                         {"role": "system", "content": analysis_prompt}
                     ]
-                    
                     try:
                         res = client.chat.completions.create(model="gpt-4o", messages=msgs)
                         rep = strict_json_parse(res.choices[0].message.content)
                         if not rep: rep = {"score": 75, "pros": [], "cons": [], "next_lesson_homework": {"topic": "General", "vocab": []}}
 
-                        # Verileri Kaydet
                         user_data["lessons_completed"] += 1
                         if "learned_words" in rep: user_data["vocabulary_bank"].extend(rep["learned_words"])
+                        if "next_lesson_homework" in rep: user_data["next_lesson_prep"] = rep["next_lesson_homework"]
                         
-                        # Gelecek Ödevi Kaydet
-                        if "next_lesson_homework" in rep:
-                            user_data["next_lesson_prep"] = rep["next_lesson_homework"]
-                        
-                        # Seviye Modu
                         if user_data["lessons_completed"] % 5 == 0: user_data["next_mode"] = "EXAM"
                         else: user_data["next_mode"] = "LESSON"
                         
                         save_data(user_data)
                         
-                        # --- SONUÇ EKRANI ---
                         st.balloons()
                         st.markdown(f"## 📊 Final Score: {rep.get('score')}")
                         
-                        # 1. Reading Sonuçları (Doğru/Yanlış Tablosu)
                         st.subheader("📝 Reading Results")
                         for feedback in rep.get("reading_feedback", []):
                             color = "green" if feedback["is_correct"] else "red"
                             emoji = "✅" if feedback["is_correct"] else "❌"
                             with st.expander(f"{emoji} {feedback['question']}", expanded=True):
-                                st.write(f"**You said:** {feedback['user_answer']}")
+                                st.write(f"**You:** {feedback['user_answer']}")
                                 if not feedback["is_correct"]:
-                                    st.markdown(f":{color}[**Correct Answer:** {feedback['correct_answer']}]")
-                                else:
-                                    st.caption("Correct!")
+                                    st.markdown(f":{color}[**Correct:** {feedback['correct_answer']}]")
 
-                        # 2. Genel Feedback
                         st.divider()
                         c1, c2 = st.columns(2)
-                        with c1: 
-                            st.success(f"**✅ Pros:**\n" + "\n".join([f"- {i}" for i in rep.get('pros', [])]))
-                        with c2: 
-                            st.error(f"**🔻 Needs Work:**\n" + "\n".join([f"- {i}" for i in rep.get('cons', [])]))
+                        with c1: st.success(f"**✅ Pros:**\n" + "\n".join([f"- {i}" for i in rep.get('pros', [])]))
+                        with c2: st.error(f"**🔻 Needs Work:**\n" + "\n".join([f"- {i}" for i in rep.get('cons', [])]))
                         
-                        # 3. Ödev Kartı (HOMEWORK CARD)
                         st.divider()
                         st.info(f"### 📅 NEXT LESSON HOMEWORK")
                         hw = rep.get("next_lesson_homework", {})
                         st.write(f"**Topic:** {hw.get('topic', 'General')}")
-                        st.write("**Study these words:**")
                         st.code(", ".join(hw.get('vocab', [])))
-                        st.caption("These will be automatically loaded when you start the next lesson!")
 
                         st.session_state.lesson_active = False
 
