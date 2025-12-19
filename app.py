@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v14", page_icon="🇹🇷", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v15", page_icon="🇹🇷", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- HALÜSİNASYON FİLTRESİ ---
@@ -333,7 +333,7 @@ if api_key:
                         st.success("\n".join(lesson['feedback_pros']))
                     if 'feedback_cons' in lesson:
                         st.error("\n".join(lesson['feedback_cons']))
-                    if 'grammar_topics' in lesson: # 🔥 YENİ
+                    if 'grammar_topics' in lesson:
                         st.warning("**Çalışılması Gerekenler:**\n" + "\n".join([f"- {t}" for t in lesson['grammar_topics']]))
 
     # --- AI COACH ---
@@ -358,10 +358,19 @@ if api_key:
                     st.markdown("**🆕 Target Words:**")
                     st.write(", ".join(st.session_state.target_vocab))
                 if not st.session_state.get("reading_phase", False):
+                    # Progress Bar ve Metin Düzeltme
                     curr_sec = st.session_state.accumulated_speaking_time
                     targ_sec = st.session_state.target_speaking_seconds
-                    prog = min(curr_sec / targ_sec, 1.0)
-                    st.progress(prog, text=f"Speaking: {int(curr_sec//60)}m / {int(targ_sec//60)}m")
+                    
+                    prog = min(curr_sec / targ_sec, 1.0) if targ_sec > 0 else 0
+                    
+                    # 🔥 DÜZELTİLEN KISIM: Dakika ve Saniye Gösterimi
+                    c_min = int(curr_sec // 60)
+                    c_sec = int(curr_sec % 60)
+                    t_min = int(targ_sec // 60)
+                    t_sec = int(targ_sec % 60)
+                    
+                    st.progress(prog, text=f"Speaking: {c_min}m {c_sec}s / {t_min}m {t_sec}s")
 
             st.divider()
             if st.button("RESET ALL DATA"):
@@ -391,6 +400,7 @@ if api_key:
                             is_last_message = (i == messages_len - 1)
                             is_assistant = (msg["role"] == "assistant")
 
+                            # --- INSTA-FIX ---
                             if msg["role"] == "user" and "correction" in msg:
                                 with st.expander("📝 Grammar Check (Click to see)", expanded=True):
                                     st.markdown(f":red[{msg['correction']}]")
@@ -477,12 +487,13 @@ if api_key:
                                     
                                     correction_txt = None
                                     try:
+                                        # 🔥 DÜZELTME: Prompt Türkçeleştirildi ve Esnetildi
                                         check_res = client.chat.completions.create(
                                             model="gpt-4o", 
-                                            messages=[{"role": "user", "content": f"Check this sentence for MAJOR grammar errors. If correct, return 'OK'. If wrong, return 'Correction: [Corrected Sentence]'. Sentence: {transcript}"}]
+                                            messages=[{"role": "user", "content": f"Check this sentence for MAJOR grammar errors (ignore minor typos). If correct, return 'OK'. If wrong, return 'Düzeltme: [Corrected Sentence]'. Sentence: {transcript}"}]
                                         )
                                         check_ans = check_res.choices[0].message.content
-                                        if "Correction:" in check_ans:
+                                        if "Düzeltme:" in check_ans:
                                             correction_txt = check_ans
                                     except: pass
 
@@ -522,7 +533,6 @@ if api_key:
                     user_answers_dict = {f"Q{i+1}": ans for i, ans in enumerate(answers)}
                     with st.spinner("Grading & Preparing Homework..."):
                         
-                        # 🔥 YENİ PROMPT: TÜRKÇE RAPOR & GRAMER KONULARI
                         analysis_prompt = f"""
                         You are an English Teacher evaluating a student.
                         
@@ -612,7 +622,6 @@ if api_key:
                             with c2: 
                                 st.error(f"**🔻 Eksiler:**\n" + "\n".join([f"- {i}" for i in rep.get('cons', [])]))
                             
-                            # 🔥 YENİ: GRAMER KONULARI
                             if rep.get("grammar_topics"):
                                 st.warning(f"**📚 Çalışılması Gereken Gramer Konuları:**\n" + "\n".join([f"- {i}" for i in rep.get('grammar_topics', [])]))
                             
