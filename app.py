@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v16", page_icon="🇹🇷", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v16.1", page_icon="🇹🇷", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- HALÜSİNASYON FİLTRESİ ---
@@ -29,7 +29,6 @@ TOPIC_POOL = {
     "B2": ["Global Warming", "Remote Work", "AI Ethics", "Economy", "Globalization", "Leadership", "Mental Health", "Privacy", "Migration", "Innovation"]
 }
 
-# (Kodun çok uzamaması için vocab havuzunu özet tutuyorum, mantık aynı çalışır)
 VOCAB_POOL = {
     "A2": ["able", "about", "above", "accept", "accident", "adventure", "agree", "allow", "angry", "answer", "apple", "arrive", "ask", "baby", "back", "bad", "bag", "ball", "bank", "beautiful", "because", "become", "bed", "begin", "believe", "big", "bird", "black", "blue", "boat", "body", "book", "boring", "borrow", "box", "boy", "bread", "break", "breakfast", "bring", "brother", "build", "bus", "business", "buy", "call", "camera", "car", "card", "care", "carry", "cat", "catch", "cause", "change", "cheap", "check", "child", "choose", "city", "clean", "clear", "climb", "clock", "close", "clothes", "cloud", "coffee", "cold", "color", "come", "company", "compare", "complete", "computer", "cook", "cool", "copy", "corner", "correct", "cost", "count", "country", "course", "cousin", "cover", "crazy", "cream", "create", "cross", "cry", "cup", "cut", "dance", "dark", "date", "daughter", "day", "dead", "deal", "dear", "death", "decide"],
     "B1": ["achieve", "action", "active", "activity", "admire", "admit", "adult", "advice", "afford", "afraid", "after", "against", "age", "agency", "agent", "ago", "agree", "agreement", "ahead", "aim", "air", "alarm", "alive", "all", "allow", "ally", "alone", "along", "already", "also", "alter", "alternative", "although", "always", "amazed", "amazing", "ambition", "among", "amount", "analyse", "analysis", "ancient", "and", "anger", "angle", "angry", "animal", "announce", "annoy", "annual", "another", "answer", "anxious", "any", "apart", "apartment", "apologize", "appear", "appearance", "apple", "application", "apply", "appoint", "appreciate", "approach", "appropriate", "approve", "area", "argue", "argument", "arise", "arm", "army", "around", "arrange", "arrangement", "arrest", "arrival", "arrive", "art", "article", "artificial", "artist", "artistic", "ashamed", "asleep", "ask", "aspect", "assess", "assessment", "assignment", "assist", "assistant", "associate", "association", "assume", "assumption", "atmosphere", "attach", "attack", "attempt"],
@@ -52,7 +51,6 @@ def load_data():
         }
     with open(DATA_FILE, "r") as f:
         data = json.load(f)
-        # Eksik alanları tamamla
         defaults = {
             "completed_topics": [], 
             "next_lesson_prep": None,
@@ -146,7 +144,9 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes):
             target_vocab = get_relevant_vocab(client, topic, avail)
 
     st.session_state.lesson_active = True
-    st.session_state.reading_phase = False 
+    st.session_state.reading_phase = False
+    st.session_state.reading_completed = False # 🔥 YENİ: Okuma bitti mi kontrolü
+    st.session_state.final_report = None # 🔥 YENİ: Raporu saklamak için
     st.session_state.accumulated_speaking_time = 0.0 
     st.session_state.target_speaking_seconds = target_speaking_minutes * 60 
     st.session_state.target_vocab = target_vocab
@@ -162,7 +162,6 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes):
         res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
         msg = res.choices[0].message.content
         
-        # İlk mesajın da Türkçesini alalım
         tr_res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": f"Translate to Turkish: {msg}"}])
         tr_msg = tr_res.choices[0].message.content
         
@@ -240,7 +239,12 @@ if api_key:
                 curr = st.session_state.accumulated_speaking_time
                 targ = st.session_state.target_speaking_seconds
                 prog = min(curr/targ, 1.0) if targ > 0 else 0
-                st.progress(prog, text=f"Speaking: {int(curr//60)}m {int(curr%60)}s / {int(targ//60)}m")
+                
+                c_min = int(curr // 60)
+                c_sec = int(curr % 60)
+                t_min = int(targ // 60)
+                t_sec = int(targ % 60)
+                st.progress(prog, text=f"Speaking: {c_min}m {c_sec}s / {t_min}m {t_sec}s")
 
         if not st.session_state.get("lesson_active", False):
             if user_data.get("next_lesson_prep"):
@@ -259,30 +263,24 @@ if api_key:
                             is_last = (i == len(st.session_state.messages) - 1)
                             is_bot = (msg["role"] == "assistant")
                             
-                            # KULLANICI HATASI (GÖSTERİM)
                             if msg["role"] == "user" and "correction" in msg:
                                 with st.expander("🛠️ Grammar Check", expanded=True):
                                     st.markdown(f":red[{msg['correction']}]")
 
-                            # ASİSTAN MESAJI
                             if is_bot:
                                 if is_last:
                                     with st.chat_message("assistant", avatar="🤖"):
                                         st.write("🔊 **Listening Mode...**")
-                                        # İngilizce Metin
                                         with st.expander("🇬🇧 English Text"):
-                                            # Hedef kelimeleri vurgula
                                             content = msg["content"]
                                             for w in st.session_state.target_vocab:
                                                 content = re.sub(f"(?i)\\b{w}\\b", f"**:{'blue'}[{w.upper()}]**", content)
                                             st.markdown(content)
-                                        # Türkçe Çeviri
-                                        with st.expander("🇹🇷 Türkçesi (Translation)"):
+                                        with st.expander("🇹🇷 Türkçesi"):
                                             st.info(msg.get("tr_content", "Çeviri hazırlanıyor..."))
                                 else:
                                     with st.chat_message("assistant", avatar="🤖"):
                                         st.write(msg["content"])
-                            # KULLANICI MESAJI
                             elif msg["role"] == "user":
                                 with st.chat_message("user", avatar="👤"):
                                     st.write(msg["content"])
@@ -294,7 +292,7 @@ if api_key:
                 if st.button("🆘 Help Me Say Something"):
                     with st.spinner("..."):
                         hist = st.session_state.messages[-4:]
-                        prompt = "Give 3 short English reply options for the user based on conversation."
+                        prompt = "Give 3 short English reply options. Format: 1. ... 2. ... 3. ..."
                         res = client.chat.completions.create(model="gpt-4o", messages=hist+[{"role":"user","content":prompt}])
                         st.info(res.choices[0].message.content)
 
@@ -308,7 +306,6 @@ if api_key:
                             st.toast("Time not up!", icon="⏳")
                         else:
                             st.session_state.reading_phase = True
-                            # Okuma metni oluştur
                             prompt = f"Create A2/B1 reading text about {st.session_state.topic}. Then 3 questions. JSON: {{'text':'...','questions':['Q1','Q2','Q3']}}"
                             res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":prompt}])
                             st.session_state.reading_content = strict_json_parse(res.choices[0].message.content)
@@ -325,17 +322,16 @@ if api_key:
                                 prompt=f"User speaking about {st.session_state.topic}."
                             ).text
                             
-                            # Filtre
                             bad = any(b.lower() in txt.lower() for b in BANNED_PHRASES)
                             if bad or len(txt.strip()) < 2:
-                                st.warning("Audio unclear/ignored.")
+                                st.warning("Audio unclear.")
                             else:
                                 st.session_state.accumulated_speaking_time += len(txt.split()) * 0.7
                                 
-                                # Gramer Kontrol (Esnek & Türkçe)
+                                # 🔥 GEVŞEK VE TÜRKÇE GRAMER KONTROLÜ
                                 corr = None
                                 try:
-                                    p_check = f"Check '{txt}'. Ignore articles (a/the) and small typos. If MAJOR error (tense/verb), return 'Düzeltme: [Correct Sentence]'. Else return 'OK'."
+                                    p_check = f"Check '{txt}'. Ignore 'the', 'a', 'an' and punctuation. If MAJOR error (tense/verb), return 'Düzeltme: [Correct Sentence]'. Else return 'OK'."
                                     c_res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":p_check}])
                                     if "Düzeltme:" in c_res.choices[0].message.content:
                                         corr = c_res.choices[0].message.content
@@ -345,11 +341,8 @@ if api_key:
                                 if corr: u_msg["correction"] = corr
                                 st.session_state.messages.append(u_msg)
                                 
-                                # Cevap Üret
                                 res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
                                 rep = res.choices[0].message.content
-                                
-                                # Çeviri Üret
                                 tr_rep = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user", "content":f"Translate to Turkish: {rep}"}]).choices[0].message.content
                                 
                                 st.session_state.messages.append({"role": "assistant", "content": rep, "tr_content": tr_rep})
@@ -360,17 +353,21 @@ if api_key:
                                 st.session_state.last_audio_response = fp.getvalue()
                                 st.rerun()
 
-            # OKUMA FAZI
+            # OKUMA FAZI (HATA DÜZELTİLDİ: STATE KULLANIMI)
             else:
-                st.markdown("### 📖 Reading")
-                content = st.session_state.get("reading_content", {})
-                st.info(content.get("text", ""))
-                
-                with st.form("read_form"):
-                    ans_list = []
-                    for i, q in enumerate(content.get("questions", [])):
-                        ans_list.append(st.text_input(f"{i+1}. {q}"))
-                    if st.form_submit_button("🏁 FINISH"):
+                # 🔥 EĞER RAPOR OLUŞMADIYSA FORMU GÖSTER
+                if not st.session_state.get("reading_completed", False):
+                    st.markdown("### 📖 Reading")
+                    content = st.session_state.get("reading_content", {})
+                    st.info(content.get("text", ""))
+                    
+                    with st.form("read_form"):
+                        ans_list = []
+                        for i, q in enumerate(content.get("questions", [])):
+                            ans_list.append(st.text_input(f"{i+1}. {q}"))
+                        submitted = st.form_submit_button("🏁 FINISH")
+                    
+                    if submitted:
                         with st.spinner("Analyzing..."):
                             prompt = """
                             Analyze Speaking & Reading.
@@ -384,15 +381,14 @@ if api_key:
                                 "next_lesson_homework": {"topic": "...", "vocab": []}
                             }
                             """
-                            # Kullanıcı cevaplarını ekle
                             user_json = json.dumps({f"Q{i}": a for i,a in enumerate(ans_list)})
                             msgs = st.session_state.messages + [{"role":"user","content":f"Reading Answers: {user_json}"}, {"role":"system","content":prompt}]
                             
                             res = client.chat.completions.create(model="gpt-4o", messages=msgs)
                             rep = strict_json_parse(res.choices[0].message.content)
-                            if not rep: rep = {"score": 70} # Fallback
+                            if not rep: rep = {"score": 70} 
 
-                            # Kaydet
+                            # Kaydet ve State Güncelle
                             user_data["lessons_completed"] += 1
                             user_data["rotated_vocab"][user_data["current_level"]].extend(st.session_state.target_vocab)
                             if "next_lesson_homework" in rep: user_data["next_lesson_prep"] = rep["next_lesson_homework"]
@@ -411,24 +407,39 @@ if api_key:
                             user_data["lesson_history"].append(hist)
                             save_data(user_data)
                             
-                            # Sonuç Ekranı
-                            st.balloons()
-                            st.markdown(f"## 📊 Score: {rep.get('score')} (🗣️{rep.get('speaking_score')} | 📖{rep.get('reading_score')})")
-                            
-                            c1, c2 = st.columns(2)
-                            with c1: st.success("\n".join(rep.get('pros', [])))
-                            with c2: st.error("\n".join(rep.get('cons', [])))
-                            
-                            if rep.get('grammar_topics'):
-                                st.warning("**Çalış:** " + ", ".join(rep.get('grammar_topics')))
-                                
-                            st.info(f"**Next:** {rep.get('next_lesson_homework', {}).get('topic')}")
-                            
-                            st.session_state.lesson_active = False
-                            if st.button("🚀 START NEXT"):
-                                st.session_state.messages = []
-                                st.session_state.reading_phase = False
-                                st.session_state.accumulated_speaking_time = 0
-                                st.rerun()
+                            # State'e at ve yenile
+                            st.session_state.final_report = rep
+                            st.session_state.reading_completed = True
+                            st.rerun()
+                
+                # 🔥 EĞER RAPOR VARSA SONUÇ EKRANINI GÖSTER
+                else:
+                    rep = st.session_state.final_report
+                    st.balloons()
+                    st.markdown(f"## 📊 Score: {rep.get('score')} (🗣️{rep.get('speaking_score')} | 📖{rep.get('reading_score')})")
+                    
+                    # Reading detayları
+                    for fb in rep.get("reading_feedback", []):
+                        color = "green" if fb["is_correct"] else "red"
+                        with st.expander(f"Question: {fb['question']}"):
+                            st.write(f"You: {fb['user_answer']}")
+                            st.markdown(f":{color}[Correct: {fb['correct_answer']}]")
+
+                    c1, c2 = st.columns(2)
+                    with c1: st.success("\n".join(rep.get('pros', [])))
+                    with c2: st.error("\n".join(rep.get('cons', [])))
+                    
+                    if rep.get('grammar_topics'):
+                        st.warning("**Çalış:** " + ", ".join(rep.get('grammar_topics')))
+                        
+                    st.info(f"**Next:** {rep.get('next_lesson_homework', {}).get('topic')}")
+                    
+                    if st.button("🚀 START NEXT"):
+                        st.session_state.messages = []
+                        st.session_state.reading_phase = False
+                        st.session_state.reading_completed = False
+                        st.session_state.final_report = None
+                        st.session_state.accumulated_speaking_time = 0
+                        st.rerun()
 else:
     st.warning("Enter API Key")
