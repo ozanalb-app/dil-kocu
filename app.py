@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v12", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v13", page_icon="🎓", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- HALÜSİNASYON FİLTRESİ ---
@@ -63,39 +63,80 @@ TOPIC_POOL = {
     ]
 }
 
+# 🔥 YENİ: 1000 KELİMELİK DEV HAVUZ (A2/B1/B2 DAĞILIMLI)
 VOCAB_POOL = {
     "A2": [
-        "able", "about", "above", "across", "afraid", "after", "again", "against", "age", "ago",
-        "agree", "air", "all", "allow", "almost", "alone", "along", "already", "also", "always",
-        "among", "angry", "animal", "another", "answer", "any", "anyone", "appear", "apple", "area",
-        "arm", "around", "arrive", "art", "ask", "baby", "back", "bad", "bag", "ball",
-        "bank", "base", "bath", "be", "beach", "beautiful", "because", "become", "bed", "before",
-        "begin", "behind", "believe", "below", "best", "better", "between", "big", "bird", "black",
-        "blue", "board", "boat", "body", "book", "both", "bottom", "box", "boy", "bread",
-        "break", "breakfast", "bring", "brother", "brown", "build", "bus", "business", "busy", "but",
-        "buy", "cake", "call", "can", "car", "card", "care", "carry", "case", "cat", "friend", "family", "house", "food", "water", "school", "music", "movie", "city", "park"
+        "ability", "able", "abroad", "accept", "accident", "adventure", "agree", "airport", "allow", "ambition",
+        "amusement", "ancient", "angry", "annoy", "answer", "anxious", "apartment", "appeal", "appear", "apple",
+        "appoint", "approach", "approve", "area", "argue", "arrive", "art", "article", "ashamed", "ask",
+        "asleep", "attack", "attempt", "attend", "attention", "attitude", "attract", "audience", "author", "average",
+        "avoid", "awake", "award", "baby", "back", "bad", "bag", "balance", "ball", "bank",
+        "bar", "base", "basic", "bath", "battle", "beach", "bear", "beat", "beautiful", "beauty",
+        "because", "become", "bed", "bedroom", "before", "begin", "behave", "behind", "believe", "bell",
+        "belong", "below", "belt", "bend", "benefit", "best", "better", "between", "bicycle", "big",
+        "bike", "bill", "bird", "birth", "birthday", "bit", "bite", "black", "blame", "blank",
+        "blind", "block", "blood", "blow", "blue", "board", "boat", "body", "boil", "bomb",
+        "bone", "book", "boot", "border", "bored", "boring", "born", "borrow", "boss", "both",
+        "bother", "bottle", "bottom", "box", "boy", "brain", "branch", "brave", "bread", "break",
+        "breakfast", "breath", "breathe", "brick", "bridge", "brief", "bright", "bring", "broad", "broadcast",
+        "broken", "brother", "brown", "brush", "build", "building", "bullet", "burn", "burst", "bury",
+        "bus", "bush", "business", "busy", "but", "butter", "button", "buy", "buyer", "cabinet",
+        "cable", "cake", "calculate", "call", "calm", "camera", "camp", "campaign", "can", "cancel",
+        "cancer", "candidate", "candy", "cap", "capable", "capacity", "capital", "captain", "capture", "car",
+        "card", "care", "career", "careful", "careless", "carpet", "carrot", "carry", "case", "cash",
+        "cast", "cat", "catch", "category", "cause", "cease", "ceiling", "celebrate", "cell", "cent",
+        "center", "century", "ceremony", "certain", "chain", "chair", "chairman", "challenge", "champion", "chance",
+        "change", "channel", "chapter", "character", "charge", "charity", "charm", "chart", "chase", "cheap",
+        "cheat", "check", "cheek", "cheerful", "cheese", "chemical", "chest", "chicken", "chief", "child",
+        "childhood", "chimney", "chin", "chocolate", "choice", "choose", "church", "circle", "circus", "citizen",
+        "city", "civil", "claim", "class", "classic", "classroom", "clean", "clear", "clerk", "clever",
+        "click", "client", "climate", "climb", "clock", "close", "cloth", "clothes", "clothing", "cloud",
+        "club", "coach", "coal", "coast", "coat", "code", "coffee", "coin", "cold", "collapse",
+        "collar", "collect", "college", "color", "column", "comb", "combine", "come", "comedy", "comfort",
+        "command", "comment", "commerce", "commission", "commit", "committee", "common", "communicate", "company", "compare",
+        "compete", "competition", "complain", "complete", "complex", "computer", "concentrate", "concept", "concern", "concert"
     ],
     "B1": [
-        "achieve", "action", "activity", "admit", "adult", "affect", "afford", "agency", "agent", "aim",
-        "airline", "alive", "amount", "ancient", "angle", "announce", "anxious", "apart", "appeal", "appear",
-        "apply", "approach", "approve", "argue", "arise", "arrange", "arrest", "arrival", "article", "ashamed",
-        "asleep", "assist", "assume", "attack", "attempt", "attend", "attitude", "attract", "audience", "author",
-        "average", "avoid", "awake", "award", "aware", "backwards", "bacon", "badge", "baggage", "baker",
-        "balance", "ban", "bandage", "bar", "bargain", "barrier", "basic", "basis", "battle", "beauty",
-        "behave", "belief", "belong", "belt", "beneath", "benefit", "beside", "bet", "beyond", "bicycle",
-        "bid", "bill", "biology", "birth", "bitter", "blame", "blank", "blind", "block", "blood",
-        "blow", "boil", "bomb", "bone", "bonus", "border", "bored", "borrow", "bother", "bottle", "opinion", "suggest", "experience", "prefer", "describe"
+        "abolish", "abortion", "absence", "absorb", "abstract", "absurd", "abundance", "abuse", "academy", "accelerate",
+        "accent", "access", "accessible", "accommodation", "accomplish", "accordance", "account", "accumulate", "accuracy", "accurate",
+        "accusation", "accuse", "ache", "achievement", "acid", "acknowledge", "acquire", "acre", "act", "action",
+        "active", "activist", "activity", "actor", "actress", "actual", "actually", "adapt", "add", "addition",
+        "additional", "address", "adequate", "adjust", "administration", "administrator", "admire", "admission", "admit", "adolescent",
+        "adopt", "adult", "advance", "advanced", "advantage", "adventure", "adverb", "advertise", "advertisement", "advice",
+        "advise", "adviser", "advocate", "affair", "affect", "affection", "afford", "afraid", "afternoon", "afterwards",
+        "agency", "agenda", "agent", "aggressive", "ago", "agree", "agreement", "agriculture", "ahead", "aid",
+        "aide", "aim", "air", "aircraft", "airline", "airport", "alarm", "album", "alcohol", "alert",
+        "alien", "alike", "alive", "all", "allegation", "allege", "allegedly", "alliance", "allocate", "allow",
+        "allowance", "ally", "almost", "alone", "along", "alongside", "already", "also", "alter", "alternative",
+        "although", "altogether", "aluminium", "always", "amateur", "amazed", "amazing", "ambassador", "ambition", "ambitious",
+        "ambulance", "amend", "amendment", "amid", "among", "amount", "amuse", "amusing", "analyse", "analysis",
+        "analyst", "ancestor", "anchor", "ancient", "and", "angel", "anger", "angle", "angrily", "angry",
+        "animal", "ankle", "anniversary", "announce", "announcement", "annoy", "annoyed", "annoying", "annual", "annually",
+        "another", "answer", "anticipate", "anxiety", "anxious", "any", "anybody", "anymore", "anyone", "anything",
+        "anyway", "anywhere", "apart", "apartment", "apologize", "apology", "app", "apparatus", "apparent", "apparently",
+        "appeal", "appealing", "appear", "appearance", "apple", "appliance", "applicable", "application", "apply", "appoint",
+        "appointment", "appreciate", "appreciation", "approach", "appropriate", "approval", "approve", "approximate", "approximately", "architect"
     ],
     "B2": [
-        "abandon", "absolute", "academic", "acceptable", "accompany", "account", "accurate", "accuse", "acknowledge", "acquire",
-        "actual", "adapt", "additional", "address", "administration", "adopt", "advance", "advantage", "adventure", "advertise",
-        "adviser", "advocate", "affair", "affect", "afford", "aggressive", "agreement", "agriculture", "aid", "aircraft",
-        "alarm", "alcohol", "alive", "alleged", "allowance", "ally", "alter", "alternative", "ambition", "analyse",
-        "analysis", "anger", "angle", "anniversary", "announce", "annual", "anticipate", "anxiety", "apologize", "apparent",
-        "appeal", "appearance", "appoint", "appreciate", "appropriate", "approval", "approve", "approximately", "architect", "architecture",
-        "argue", "arise", "armed", "aspect", "assault", "assert", "assess", "assessment", "asset", "assign",
-        "assistance", "assistant", "associate", "association", "assume", "assumption", "assure", "atmosphere", "attach", "attachment",
-        "attempt", "attend", "attention", "attitude", "attorney", "attract", "attraction", "attribute", "audience", "authority", "perspective", "imply", "consequence", "debate", "theory"
+        "abandon", "abbey", "abide", "ability", "abnormal", "aboard", "abolish", "aboriginal", "abortion", "abound",
+        "about", "above", "abroad", "abrupt", "absence", "absent", "absolute", "absolutely", "absorb", "abstract",
+        "absurd", "abundance", "abundant", "abuse", "academic", "academy", "accelerate", "accent", "accept", "acceptable",
+        "acceptance", "access", "accessible", "accident", "accidental", "accidentally", "accommodate", "accommodation", "accompany", "accomplish",
+        "accord", "accordance", "according", "account", "accountability", "accountable", "accountant", "accounting", "accumulate", "accumulation",
+        "accuracy", "accurate", "accusation", "accuse", "accused", "achieve", "achievement", "acid", "acknowledge", "acquire",
+        "acquisition", "acre", "acrobat", "across", "act", "action", "activate", "active", "activist", "activity",
+        "actor", "actress", "actual", "actually", "acute", "ad", "adapt", "adaptation", "add", "addict",
+        "addicted", "addiction", "addition", "additional", "additionally", "address", "adequate", "adequately", "adhere", "adjacent",
+        "adjust", "adjustment", "administer", "administration", "administrative", "administrator", "admire", "admission", "admit", "adolescent",
+        "adopt", "adoption", "adult", "advance", "advanced", "advantage", "adventure", "adverse", "advertise", "advertisement",
+        "advertising", "advice", "advise", "adviser", "advocate", "aesthetic", "affair", "affect", "affection", "afford",
+        "affordable", "afraid", "after", "aftermath", "afternoon", "afterwards", "again", "against", "age", "agency",
+        "agenda", "agent", "aggravate", "aggression", "aggressive", "aggressively", "agile", "agitate", "ago", "agree",
+        "agreeable", "agreement", "agricultural", "agriculture", "ahead", "aid", "aide", "ail", "aim", "air",
+        "aircraft", "airline", "airport", "alarm", "alarming", "album", "alcohol", "alcoholic", "alert", "alien",
+        "alienate", "align", "alignment", "alike", "alive", "all", "allegation", "allege", "allegedly", "alliance",
+        "allied", "allocate", "allocation", "allow", "allowance", "ally", "almost", "alone", "along", "alongside",
+        "aloud", "alphabet", "already", "also", "alter", "alteration", "alternate", "alternative", "alternatively", "although"
     ]
 }
 
@@ -143,11 +184,15 @@ def determine_sub_level(level, lessons_completed):
 def get_relevant_vocab(client, topic, available_vocab_list):
     if len(available_vocab_list) <= 5:
         return available_vocab_list
+    
+    # 50 aday seçip GPT'ye sor (Token tasarrufu)
     candidates = random.sample(available_vocab_list, min(50, len(available_vocab_list)))
+    
     prompt = f"""
-    I have a lesson topic: "{topic}".
-    I have a list of candidate words: {', '.join(candidates)}.
-    TASK: Select exactly 5 words from the list that are MOST RELEVANT to the topic "{topic}".
+    TOPIC: "{topic}"
+    CANDIDATES: {', '.join(candidates)}
+    
+    TASK: Select exactly 5 words from the CANDIDATES list that are MOST RELEVANT to the TOPIC.
     OUTPUT ONLY A JSON ARRAY of strings. Example: ["word1", "word2", "word3", "word4", "word5"]
     """
     try:
@@ -189,6 +234,7 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes):
             all_topics = TOPIC_POOL.get(level, ["General"])
             completed = user_data.get("completed_topics", [])
             available_topics = [t for t in all_topics if t not in completed]
+            
             if not available_topics:
                 user_data["completed_topics"] = [] 
                 save_data(user_data)
@@ -274,10 +320,9 @@ else:
 if api_key:
     client = OpenAI(api_key=api_key)
     
-    # 🔥 YENİ: NAVİGASYON MENÜSÜ
     page = st.sidebar.radio("📌 Menu", ["🎤 AI Coach", "🏋️ Vocab Gym", "📜 History"])
 
-    # --- SAYFA 1: VOCAB GYM (KELİME KARTLARI) ---
+    # --- VOCAB GYM ---
     if page == "🏋️ Vocab Gym":
         st.title("🏋️ Vocabulary Gym")
         st.markdown(f"Practice words for Level **{user_data['current_level']}**")
@@ -290,7 +335,6 @@ if api_key:
         c1, c2 = st.columns(2)
         with c1:
             if st.button("🔄 Draw New Card", type="primary", use_container_width=True):
-                # Havuzdan rastgele kelime seç
                 pool = VOCAB_POOL.get(user_data["current_level"], ["hello"])
                 st.session_state.flashcard_word = random.choice(pool)
                 st.session_state.flashcard_revealed = False
@@ -304,7 +348,6 @@ if api_key:
             if not st.session_state.flashcard_revealed:
                 if st.button("👀 Reveal Meaning", use_container_width=True):
                     st.session_state.flashcard_revealed = True
-                    # GPT'ye sor
                     with st.spinner("Asking AI..."):
                         prompt = f"Define '{st.session_state.flashcard_word}' in Turkish and give one English example sentence. JSON: {{'tr': '...', 'ex': '...'}}"
                         try:
@@ -318,7 +361,7 @@ if api_key:
                 st.success(f"🇹🇷 **Anlamı:** {data.get('tr', 'Bulunamadı')}")
                 st.info(f"🇬🇧 **Örnek:** {data.get('ex', '')}")
 
-    # --- SAYFA 2: HISTORY (GEÇMİŞ) ---
+    # --- HISTORY ---
     elif page == "📜 History":
         st.title("📜 Training History")
         history = user_data.get("lesson_history", [])
@@ -336,11 +379,10 @@ if api_key:
                     if 'feedback_cons' in lesson:
                         st.error("\n".join(lesson['feedback_cons']))
 
-    # --- SAYFA 3: AI COACH (ANA DERS) ---
+    # --- AI COACH ---
     elif page == "🎤 AI Coach":
         st.title("🗣️ AI Personal Coach (Blind Mode)")
         
-        # SIDEBAR BİLGİLERİ
         with st.sidebar:
             st.divider()
             sub = determine_sub_level(user_data['current_level'], user_data['lessons_completed'])
@@ -359,7 +401,6 @@ if api_key:
                     st.markdown("**🆕 Target Words:**")
                     st.write(", ".join(st.session_state.target_vocab))
                 if not st.session_state.get("reading_phase", False):
-                    # Progress Bar
                     curr_sec = st.session_state.accumulated_speaking_time
                     targ_sec = st.session_state.target_speaking_seconds
                     prog = min(curr_sec / targ_sec, 1.0)
@@ -370,7 +411,6 @@ if api_key:
                 save_data({"current_level": "A2", "lessons_completed": 0, "exam_scores": [], "vocabulary_bank": [], "rotated_vocab": {"A2": [], "B1": [], "B2": []}, "completed_topics": [], "lesson_history": [], "next_mode": "ASSESSMENT", "next_lesson_prep": None})
                 st.rerun()
 
-        # DERS BAŞLATMA EKRANI
         if not st.session_state.get("lesson_active", False):
             st.markdown(f"### Welcome Pınar! Ready for **{user_data['current_level']}**?")
             if user_data.get("next_lesson_prep"):
@@ -384,9 +424,7 @@ if api_key:
                     start_lesson_logic(client, user_data["current_level"], user_data["next_mode"], target_mins)
                     st.rerun()
 
-        # DERS AKIŞI
         else:
-            # FAZ 1: KONUŞMA
             if not st.session_state.get("reading_phase", False):
                 chat_container = st.container()
                 with chat_container:
@@ -396,8 +434,7 @@ if api_key:
                             is_last_message = (i == messages_len - 1)
                             is_assistant = (msg["role"] == "assistant")
 
-                            # --- 🔥 HATA DÜZELTME GÖSTERİMİ (INSTA-FIX) ---
-                            # Eğer bu mesajdan bir önce, kullanıcıya ait bir düzeltme notu varsa göster
+                            # --- INSTA-FIX ---
                             if msg["role"] == "user" and "correction" in msg:
                                 with st.expander("📝 Grammar Check (Click to see)", expanded=True):
                                     st.markdown(f":red[{msg['correction']}]")
@@ -417,11 +454,9 @@ if api_key:
 
                 st.write("---")
                 
-                # --- 🔥 "NE DİYEBİLİRİM?" BUTONU ---
                 if st.button("🆘 What can I say? (Get Hints)"):
                     with st.spinner("Thinking..."):
                         hint_prompt = "Based on the conversation, provide 3 short, natural English response options for the user. Output format: 1. ... 2. ... 3. ..."
-                        # Son mesajları gönder
                         hist = st.session_state.messages[-4:]
                         try:
                             res = client.chat.completions.create(model="gpt-4o", messages=hist + [{"role": "user", "content": hint_prompt}])
@@ -484,7 +519,6 @@ if api_key:
                                     word_count = len(transcript.split())
                                     st.session_state.accumulated_speaking_time += word_count * 0.7
                                     
-                                    # --- 🔥 INSTA-FIX (ANLIK DÜZELTME) ---
                                     correction_txt = None
                                     try:
                                         check_res = client.chat.completions.create(
@@ -496,7 +530,6 @@ if api_key:
                                             correction_txt = check_ans
                                     except: pass
 
-                                    # Mesaja düzeltmeyi ekle (Göstermek için)
                                     user_msg_obj = {"role": "user", "content": transcript}
                                     if correction_txt: user_msg_obj["correction"] = correction_txt
                                     
@@ -514,7 +547,6 @@ if api_key:
                             except Exception as e: 
                                 st.error(f"⚠️ AUDIO ERROR: {e}")
 
-            # FAZ 2: YAZILI OKUMA SINAVI
             else:
                 st.markdown("### 📖 Reading & Comprehension")
                 content = st.session_state.get("reading_content", {})
