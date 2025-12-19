@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v18", page_icon="🔊", layout="wide")
+st.set_page_config(page_title="Pınar'ın Dil Koçu", page_icon="🔊", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- HALÜSİNASYON FİLTRESİ ---
@@ -453,3 +453,4 @@ if api_key:
                         st.rerun()
 else:
     st.warning("Enter API Key")
+
