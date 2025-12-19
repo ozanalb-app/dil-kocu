@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v10 (Smart Vocab)", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v11", page_icon="🎓", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- HALÜSİNASYON FİLTRESİ ---
@@ -27,7 +27,7 @@ TOPIC_POOL = {
     "A2": [
         "My Daily Morning Routine", "What I Do in the Evening", "Ordering Food at a Restaurant",
         "Asking for Directions in a City", "Shopping for Clothes", "Buying Food at the Supermarket",
-        "My Favorite Food", "Parent Teacher Meeting", "My Favorite Music", "My Best Friend", "My Family",
+        "My Favorite Food", "My Favorite Movie", "My Favorite Music", "My Best Friend", "My Family",
         "My Job or Daily Responsibilities", "My Hobbies and Free Time", "Plans for Next Weekend",
         "My Favorite Place in My City", "Talking About the Weather", "My House or Apartment",
         "A Typical Day at Home", "Going to the Doctor", "Taking Public Transport",
@@ -63,7 +63,6 @@ TOPIC_POOL = {
     ]
 }
 
-# GENİŞLETİLMİŞ KELİME HAVUZU
 VOCAB_POOL = {
     "A2": [
         "able", "about", "above", "across", "afraid", "after", "again", "against", "age", "ago",
@@ -141,39 +140,30 @@ def determine_sub_level(level, lessons_completed):
     elif cycle < 7: return "Medium"
     else: return "High"
 
-# 🔥 YENİ: GPT İLE AKILLI KELİME SEÇİCİ
 def get_relevant_vocab(client, topic, available_vocab_list):
-    """
-    Havuzdaki rastgele kelimeler yerine, GPT'ye sorup konuya uygun olanları seçtirir.
-    """
     if len(available_vocab_list) <= 5:
         return available_vocab_list
-    
-    # Çok fazla kelimeyi GPT'ye göndermemek için 50 aday seçiyoruz
     candidates = random.sample(available_vocab_list, min(50, len(available_vocab_list)))
-    
     prompt = f"""
     I have a lesson topic: "{topic}".
     I have a list of candidate words: {', '.join(candidates)}.
-    
     TASK: Select exactly 5 words from the list that are MOST RELEVANT to the topic "{topic}".
     OUTPUT ONLY A JSON ARRAY of strings. Example: ["word1", "word2", "word3", "word4", "word5"]
     """
-    
     try:
         res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": prompt}])
         selected = strict_json_parse(res.choices[0].message.content)
         if isinstance(selected, list) and len(selected) > 0:
-            return selected[:5] # En fazla 5 tane al
+            return selected[:5]
         else:
-            return random.sample(candidates, 5) # Hata olursa rastgele dön
+            return random.sample(candidates, 5)
     except:
-        return random.sample(candidates, 5) # Hata olursa rastgele dön
+        return random.sample(candidates, 5)
 
 user_data = load_data()
 
 # --- 4. DERS MANTIĞI ---
-def start_lesson_logic(client, level, mode, target_speaking_minutes, speed_slow):
+def start_lesson_logic(client, level, mode, target_speaking_minutes):
     sub_level = determine_sub_level(level, user_data["lessons_completed"])
     full_level_desc = f"{level} ({sub_level})"
     
@@ -187,7 +177,7 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, speed_slow)
         assigned_vocab = plan.get("vocab", [])
         st.toast(f"📅 Planned Topic: {assigned_topic}", icon="✅")
 
-    # 2. Konu Seçimi
+    # 2. Konu Seçimi (TEKRAR ETMEME MANTIĞI - DÜZELTİLDİ)
     if mode == "EXAM":
         topic = random.choice(TOPIC_POOL[level])
         system_role = f"ACT AS: Strict Examiner. LEVEL: {full_level_desc}. TOPIC: {topic}. GOAL: Test user. RESPONSE STYLE: Short questions. ALWAYS ask a question."
@@ -201,12 +191,20 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, speed_slow)
             all_topics = TOPIC_POOL.get(level, ["General"])
             completed = user_data.get("completed_topics", [])
             available_topics = [t for t in all_topics if t not in completed]
+            
+            # Eğer konu kalmadıysa listeyi sıfırla
             if not available_topics:
-                completed = [t for t in completed if t not in all_topics]
-                user_data["completed_topics"] = completed
+                user_data["completed_topics"] = [] 
                 save_data(user_data)
                 available_topics = all_topics 
+            
             topic = random.choice(available_topics)
+            
+            # 🔥 KRİTİK DÜZELTME: Konu seçildiği AN 'completed' listesine ekle.
+            # Böylece kullanıcı dersi yarıda kesse bile bir daha bu konu gelmez.
+            if topic not in user_data["completed_topics"]:
+                user_data["completed_topics"].append(topic)
+                save_data(user_data)
 
         system_role = f"""
         ACT AS: Helpful English Coach. 
@@ -216,7 +214,7 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, speed_slow)
         CRITICAL RULE: You MUST ALWAYS end your response with a related FOLLOW-UP QUESTION.
         """
 
-    # 3. Kelime Seçimi (AKILLI + KONU ODAKLI)
+    # 3. Kelime Seçimi
     target_vocab = []
     review_vocab = []
     
@@ -226,27 +224,22 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, speed_slow)
         else:
             full_list = VOCAB_POOL.get(level, [])
             used_list = user_data["rotated_vocab"].get(level, [])
-            
-            # Havuzdan kullanılmayanları bul
             available_vocab = [w for w in full_list if w not in used_list]
             
-            # Liste bitmişse sıfırla
             if len(available_vocab) < 5:
                 user_data["rotated_vocab"][level] = [] 
                 available_vocab = full_list
                 save_data(user_data)
             
-            # 🔥 BURASI DEĞİŞTİ: Rastgele değil, GPT ile konuya uygun seçiyoruz
             target_vocab = get_relevant_vocab(client, topic, available_vocab)
 
-        # Spaced Repetition (Eski kelimelerden tekrar)
         learned_set = set(user_data.get("vocabulary_bank", []))
         if learned_set:
             past_candidates = [w for w in list(learned_set) if w not in target_vocab]
             if past_candidates:
                 review_vocab = random.sample(past_candidates, min(3, len(past_candidates)))
 
-    # State Başlatma
+    # State
     st.session_state.lesson_active = True
     st.session_state.reading_phase = False 
     st.session_state.accumulated_speaking_time = 0.0 
@@ -255,7 +248,6 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, speed_slow)
     st.session_state.review_vocab = review_vocab
     st.session_state.topic = topic
     st.session_state.last_audio_bytes = None
-    st.session_state.speed_slow = speed_slow 
     
     vocab_instr = f"NEW WORDS: {', '.join(target_vocab)}. REVIEW WORDS: {', '.join(review_vocab)}."
     intro_instr = f"Start by saying 'Hello Pınar, how are you? Today we are going to talk about {topic}'."
@@ -268,7 +260,7 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, speed_slow)
         first_msg = first_res.choices[0].message.content
         st.session_state.messages.append({"role": "assistant", "content": first_msg})
         
-        tts = gTTS(text=first_msg, lang='en', slow=speed_slow)
+        tts = gTTS(text=first_msg, lang='en')
         audio_fp = io.BytesIO()
         tts.write_to_fp(audio_fp)
         st.session_state.last_audio_response = audio_fp.getvalue()
@@ -293,11 +285,6 @@ with st.sidebar:
     
     if st.button("📜 View Training History"):
         st.session_state.show_history = not st.session_state.get("show_history", False)
-
-    st.divider()
-    st.write("🔊 **Voice Speed**")
-    speed_mode = st.radio("Select Speed:", ["Normal", "Slow (Tane Tane)"], horizontal=True)
-    is_slow = True if "Slow" in speed_mode else False
 
     st.divider()
     sub = determine_sub_level(user_data['current_level'], user_data['lessons_completed'])
@@ -333,9 +320,8 @@ with st.sidebar:
 # --- 6. ANA AKIŞ ---
 if api_key:
     client = OpenAI(api_key=api_key)
-    st.title("🗣️ Pınar's Personal Coach (Blind Mode)")
+    st.title("🗣️ AI Personal Coach (Blind Mode)")
 
-    # --- GEÇMİŞ EKRANI ---
     if st.session_state.get("show_history", False):
         st.subheader("📜 Training History")
         history = user_data.get("lesson_history", [])
@@ -344,7 +330,9 @@ if api_key:
         else:
             for i, lesson in enumerate(reversed(history)):
                 with st.expander(f"📚 {lesson.get('date', 'Date')} - {lesson.get('topic', 'Topic')}"):
-                    st.write(f"**Score:** {lesson.get('score', 0)}")
+                    st.write(f"**Final Score:** {lesson.get('score', 0)}")
+                    if 'speaking_score' in lesson:
+                        st.caption(f"(Speaking: {lesson.get('speaking_score')}, Reading: {lesson.get('reading_score')})")
                     st.write(f"**Words:** {', '.join(lesson.get('words', []))}")
                     st.write("**Feedback:**")
                     if 'feedback_pros' in lesson:
@@ -356,7 +344,6 @@ if api_key:
             st.session_state.show_history = False
             st.rerun()
 
-    # --- NORMAL DERS EKRANI ---
     elif not st.session_state.get("lesson_active", False):
         st.markdown(f"### Welcome Pınar! Ready for **{user_data['current_level']}**?")
         
@@ -368,7 +355,7 @@ if api_key:
         
         if st.button(btn, type="primary", use_container_width=True):
             with st.spinner("Preparing curriculum..."):
-                start_lesson_logic(client, user_data["current_level"], user_data["next_mode"], target_mins, is_slow)
+                start_lesson_logic(client, user_data["current_level"], user_data["next_mode"], target_mins)
                 st.rerun()
 
     else:
@@ -447,7 +434,7 @@ if api_key:
                                     is_hallucination = True; break
                             
                             if is_hallucination or len(transcript.strip()) < 2:
-                                st.warning("Audio unclear. Please try again.")
+                                st.warning("Audio unclear (Hallucination protected). Try again.")
                             else:
                                 word_count = len(transcript.split())
                                 st.session_state.accumulated_speaking_time += word_count * 0.7
@@ -457,7 +444,7 @@ if api_key:
                                 reply = res.choices[0].message.content
                                 st.session_state.messages.append({"role": "assistant", "content": reply})
                                 
-                                tts = gTTS(text=reply, lang='en', slow=st.session_state.speed_slow)
+                                tts = gTTS(text=reply, lang='en')
                                 audio_fp = io.BytesIO()
                                 tts.write_to_fp(audio_fp)
                                 st.session_state.last_audio_response = audio_fp.getvalue()
@@ -484,14 +471,26 @@ if api_key:
             if submitted:
                 user_answers_dict = {f"Q{i+1}": ans for i, ans in enumerate(answers)}
                 with st.spinner("Grading & Preparing Homework..."):
+                    
+                    # 🔥 80/20 PUANLAMA MANTIĞI EKLENDİ
                     analysis_prompt = f"""
                     You are an English Teacher.
-                    TASK 1: Analyze Speaking + Reading.
-                    TASK 2: Check Reading Answers. If WRONG, provide CORRECT answer.
+                    
+                    TASK 1: Analyze Speaking Phase (Chat).
+                    TASK 2: Check Reading Answers.
+                    
+                    SCORING FORMULA:
+                    1. Determine 'speaking_score' (0-100) based on fluency and vocab usage.
+                    2. Determine 'reading_score' (0-100) based on correct answers.
+                    3. Calculate 'score' = (speaking_score * 0.8) + (reading_score * 0.2).
+                    
                     TASK 3: Prepare NEXT LESSON (Homework).
+                    
                     OUTPUT JSON:
                     {{
-                        "score": (0-100),
+                        "speaking_score": 0,
+                        "reading_score": 0,
+                        "score": 0,
                         "reading_feedback": [
                             {{"question": "Q1", "user_answer": "...", "correct_answer": "...", "is_correct": true/false}},
                             {{"question": "Q2", "user_answer": "...", "correct_answer": "...", "is_correct": true/false}},
@@ -513,8 +512,6 @@ if api_key:
                         if not rep: rep = {"score": 75, "pros": [], "cons": [], "next_lesson_homework": {"topic": "General", "vocab": []}}
 
                         user_data["lessons_completed"] += 1
-                        if st.session_state.topic not in user_data["completed_topics"]:
-                            user_data["completed_topics"].append(st.session_state.topic)
                         
                         user_data["rotated_vocab"][user_data["current_level"]].extend(st.session_state.target_vocab)
 
@@ -524,11 +521,12 @@ if api_key:
                         if user_data["lessons_completed"] % 5 == 0: user_data["next_mode"] = "EXAM"
                         else: user_data["next_mode"] = "LESSON"
                         
-                        # GEÇMİŞİ KAYDET
                         history_entry = {
                             "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
                             "topic": st.session_state.topic,
                             "score": rep.get("score"),
+                            "speaking_score": rep.get("speaking_score", "-"),
+                            "reading_score": rep.get("reading_score", "-"),
                             "words": st.session_state.target_vocab,
                             "feedback_pros": rep.get("pros", []),
                             "feedback_cons": rep.get("cons", [])
@@ -538,7 +536,7 @@ if api_key:
                         save_data(user_data)
                         
                         st.balloons()
-                        st.markdown(f"## 📊 Final Score: {rep.get('score')}")
+                        st.markdown(f"## 📊 Final Score: {rep.get('score')} (Speak: {rep.get('speaking_score')} | Read: {rep.get('reading_score')})")
                         
                         st.subheader("📝 Reading Results")
                         for feedback in rep.get("reading_feedback", []):
@@ -574,5 +572,3 @@ if api_key:
                     
 else:
     st.warning("Enter API Key")
-
-
