@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v25", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v26", page_icon="🔁", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- HALÜSİNASYON FİLTRESİ ---
@@ -53,7 +53,27 @@ SCENARIO_POOL = [
     "Service: Canceling a Gym Membership (Hard Sell)",
     "Customs/Immigration: Explaining Purpose of Visit",
     "Event: Networking and Introducing Yourself",
-    "Store: Haggle over the price of an antique"
+    "Store: Haggle over the price of an antique",
+    "Bakery: Ordering a Birthday Cake with specific writing",
+    "Florist: Buying flowers for a sick friend",
+    "Shoe Shop: Asking for a different size",
+    "Bus Stop: Asking which bus goes to the stadium",
+    "Mechanic: Explaining a strange noise in the car",
+    "Lost & Found: Asking if anyone found a red umbrella",
+    "Museum: Asking for the audio guide",
+    "Concert: Asking security where the entrance is",
+    "Neighbor: Asking to borrow a ladder",
+    "Park: Warning someone their dog is running away",
+    "Beach: Asking where to rent a sunbed",
+    "Post Office: Mailing a package internationally",
+    "Optician: Booking an eye test",
+    "Dentist: Emergency appointment for toothache",
+    "University Admin: Asking about scholarship deadline",
+    "Bookstore: Asking for a recommendation",
+    "Electronics Store: Asking difference between two laptops",
+    "Travel Agency: Booking a package holiday",
+    "Hairdresser: Asking for just a trim",
+    "Market: Bargaining for fresh fruit"
 ]
 
 # --- 3. YARDIMCI FONKSİYONLAR ---
@@ -125,7 +145,7 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
     
     assigned_scenario = None
     
-    # 1. Ödev Kontrolü (Sadece LESSON modunda)
+    # 1. Ödev Kontrolü
     if mode == "LESSON" and user_data.get("next_lesson_prep") and not forced_scenario:
         plan = user_data["next_lesson_prep"]
         assigned_scenario = plan.get("scenario", plan.get("topic"))
@@ -133,36 +153,39 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
         save_data(user_data)
         st.toast(f"📅 Loaded Plan: {assigned_scenario}", icon="✅")
 
-    # 2. Senaryo Seçimi
+    # 2. Senaryo Seçimi (HAVUZ TÜKENMEDEN TEKRAR YOK)
     if forced_scenario:
         scenario = forced_scenario
     elif mode == "EXAM":
-        # Sınavda havuzdan rastgele ama zorlayıcı
         scenario = random.choice(SCENARIO_POOL)
-        system_role = f"ACT AS: Strict Examiner. LEVEL: {full_level_desc}. SCENARIO: {scenario}. CRITICAL: Ask concise questions. Do not give feedback. Act formal."
+        system_role = f"ACT AS: Strict Examiner. LEVEL: {full_level_desc}. SCENARIO: {scenario}. CRITICAL: Ask concise questions. Do not give feedback."
     else:
-        # Normal Ders
+        # LESSON MODU
         if assigned_scenario:
             scenario = assigned_scenario
         else:
+            # Tamamlananları yükle
             completed = user_data.get("completed_scenarios", [])
+            
+            # Havuzdaki uygunları bul
             available = [s for s in SCENARIO_POOL if s not in completed]
+            
+            # Eğer havuz bittiyse (her şeyi yaptıysa)
             if not available:
+                st.toast("🎉 Tüm senaryolar tamamlandı! Liste sıfırlanıyor...", icon="🔄")
                 user_data["completed_scenarios"] = []
                 save_data(user_data)
-                available = SCENARIO_POOL
+                available = SCENARIO_POOL # Full havuz
             
+            # Rastgele seç
             scenario = random.choice(available)
-            if len(user_data.get("lesson_history", [])) > 0:
-                last_topic = user_data["lesson_history"][-1].get("topic")
-                while scenario == last_topic and len(available) > 1:
-                    scenario = random.choice(available)
-
+            
+            # Seçileni anında tamamlananlara ekle ve kaydet
             if scenario not in user_data["completed_scenarios"]:
                 user_data["completed_scenarios"].append(scenario)
                 save_data(user_data)
 
-        # Normal Ders Rolü
+        # Rol Tanımı
         system_role = f"""
         ACT AS A ROLEPLAYER for: '{scenario}'. 
         LEVEL: {full_level_desc}.
@@ -177,7 +200,7 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
 
     # State Reset
     st.session_state.lesson_active = True
-    st.session_state.current_mode = mode # Modu kaydet (Exam mi Lesson mı?)
+    st.session_state.current_mode = mode 
     st.session_state.reading_phase = False
     st.session_state.reading_completed = False
     st.session_state.final_report = None
@@ -225,7 +248,6 @@ else:
 if api_key:
     client = OpenAI(api_key=api_key)
     
-    # 🔥 1. GLOBAL INFO (HER ZAMAN GÖRÜNÜR)
     with st.sidebar:
         st.title("🎓 Pınar's Academy")
         sub = determine_sub_level(user_data['current_level'], user_data['lessons_completed'])
@@ -234,14 +256,12 @@ if api_key:
         with c2: st.metric("Band", sub)
         st.caption(f"Lessons Completed: {user_data['lessons_completed']}")
         
-        # 🔥 4. MANUEL SINAV BUTONU
         st.divider()
         if st.button("📝 Take Level Exam", type="primary", use_container_width=True):
-            start_lesson_logic(client, user_data["current_level"], "EXAM", 2.0) # Sınav süresi 2 dk
+            start_lesson_logic(client, user_data["current_level"], "EXAM", 2.0)
             st.rerun()
         st.divider()
 
-    # MENU
     page = st.sidebar.radio("📌 Menu", ["🎭 Scenario Coach", "👂 Listening Quiz", "🏋️ Vocab Gym", "📜 History"])
 
     with st.sidebar:
@@ -335,21 +355,15 @@ if api_key:
             with st.expander(f"📚 {h.get('date')} - {h.get('topic')}"):
                 st.write(f"**Score:** {h.get('score')}")
                 st.caption(f"Speak: {h.get('speaking_score')} | Read: {h.get('reading_score')}")
-                
-                # 🔥 FIX 2: Boş Veri Kontrolü
-                pros = h.get('feedback_pros', [])
-                if not pros: pros = ["Veri yok"]
-                cons = h.get('feedback_cons', [])
-                if not cons: cons = ["Veri yok"]
-                
-                st.success(f"**Artılar:** {', '.join(pros)}")
-                st.error(f"**Eksiler:** {', '.join(cons)}")
+                p = h.get('feedback_pros') or ["Veri Yok"]
+                c = h.get('feedback_cons') or ["Veri Yok"]
+                st.success(f"**Artılar:** {', '.join(p)}")
+                st.error(f"**Eksiler:** {', '.join(c)}")
 
     # --- SCENARIO COACH ---
     elif page == "🎭 Scenario Coach":
         st.title("🗣️ AI Roleplay Coach")
         
-        # Sidebar Timer
         if st.session_state.get("lesson_active", False) and not st.session_state.get("reading_phase", False):
             with st.sidebar:
                 curr = st.session_state.accumulated_speaking_time
@@ -362,16 +376,13 @@ if api_key:
                 st.progress(prog, text=f"Time: {c_min}m {c_sec}s / {t_min}m {t_sec}s")
 
         if not st.session_state.get("lesson_active", False):
-            # 🔥 1. CHANGE SCENARIO BUTONU (BURAYA GELDİ)
             if st.button("🔀 Change Scenario (Shuffle)"):
-                user_data["next_lesson_prep"] = None # Eski ödevi sil
+                user_data["next_lesson_prep"] = None
                 new_sc = random.choice(SCENARIO_POOL)
                 st.toast(f"New Scenario: {new_sc}", icon="🎲")
-                # Kaydetmeden sadece UI güncelle
                 st.session_state.temp_scenario = new_sc
                 st.rerun()
 
-            # Gösterilecek senaryo
             display_sc = st.session_state.get("temp_scenario")
             if not display_sc:
                 if user_data.get("next_lesson_prep"):
@@ -384,13 +395,11 @@ if api_key:
             
             mins = st.slider("Duration (Mins)", 0.5, 30.0, 1.0, step=0.5)
             if st.button("🚀 START SCENARIO"):
-                # Eğer temp scenario varsa onu kullan
                 forced = st.session_state.get("temp_scenario")
                 start_lesson_logic(client, user_data["current_level"], "LESSON", mins, forced_scenario=forced)
-                st.session_state.temp_scenario = None # Temizle
+                st.session_state.temp_scenario = None
                 st.rerun()
         else:
-            # AKTİF DERS
             if not st.session_state.get("reading_phase", False):
                 chat_cont = st.container()
                 with chat_cont:
@@ -439,8 +448,6 @@ if api_key:
                     
                     time_up = (curr >= targ)
                     is_exam = st.session_state.get("current_mode") == "EXAM"
-                    
-                    # Sınavda süre kilidi yok, derste var
                     can_proceed = time_up or is_exam
                     
                     btn_text = "➡️ UNLOCK READING" if not can_proceed else "➡️ GO TO READING PHASE"
@@ -464,7 +471,8 @@ if api_key:
                 if audio:
                     if "last_bytes" not in st.session_state or audio['bytes'] != st.session_state.last_bytes:
                         st.session_state.last_bytes = audio['bytes']
-                        if len(audio['bytes']) < 2000:
+                        # 🔥 SES HASSASİYETİ DÜŞÜRÜLDÜ (500 Byte)
+                        if len(audio['bytes']) < 500:
                             st.warning("Audio unclear. Try again.")
                         else:
                             with st.spinner("Processing..."):
@@ -515,7 +523,6 @@ if api_key:
                                 except Exception as e: 
                                     st.error(f"Audio Error: {e}")
 
-            # OKUMA FAZI
             else:
                 if not st.session_state.get("reading_completed", False):
                     st.markdown("### 📖 Reading")
@@ -531,7 +538,6 @@ if api_key:
                     
                     if submitted:
                         with st.spinner("Analyzing..."):
-                            # 🔥 FIX 2: SAĞLAM JSON PROMPT
                             prompt = """
                             Analyze Speaking & Reading.
                             SCORING: score = (speak_score*0.8) + (read_score*0.2).
@@ -593,7 +599,6 @@ if api_key:
 
                     c1, c2 = st.columns(2)
                     with c1: 
-                        # 🔥 FIX 2: Liste boşsa hata vermesin
                         p = rep.get('pros') or ["Veri Yok"]
                         st.success("\n".join(p))
                     with c2: 
