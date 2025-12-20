@@ -13,7 +13,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v31 - Exam Master", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v31.1 - Exam Fix", page_icon="🧠", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- KELİME HAVUZU (HARDCODED) ---
@@ -128,17 +128,18 @@ def save_data(data):
 
 def strict_json_parse(text):
     text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(json)?|```$", "", text, flags=re.MULTILINE).strip()
+    # Markdown bloklarını temizle
+    if "```" in text:
+        text = re.sub(r"```(json)?", "", text).replace("```", "").strip()
+    
+    # Sadece ilk { ve son } arasını al
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        try:
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start != -1 and end != -1:
-                return json.loads(text[start:end])
-        except:
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start != -1 and end != -1:
+            json_str = text[start:end]
+            return json.loads(json_str)
+        else:
             return {}
     except:
         return {}
@@ -179,17 +180,33 @@ def generate_dynamic_vocab(client, scenario, level, user_data):
 def generate_exam_questions(client, level):
     prompt = f"""
     Create a {level} level English exam JSON structure.
-    Parts:
-    1. VOCABULARY: 3 multiple-choice questions. Format: {{"question": "Definition of 'word'", "options": ["A", "B", "C", "D"], "answer": "A"}}
-    2. GRAMMAR: 3 fill-in-the-blank questions. Format: {{"sentence": "She ____ (go) to school yesterday.", "answer": "went"}}
-    3. SPEAKING_TOPIC: 1 open-ended topic (e.g., "Talk about your favorite holiday").
     
-    OUTPUT JSON ONLY.
+    IMPORTANT: The keys MUST be exactly "VOCABULARY", "GRAMMAR", "SPEAKING_TOPIC".
+    
+    Structure:
+    1. VOCABULARY: 3 multiple-choice questions. Format: {{"question": "Meaning of 'word'?", "options": ["A", "B", "C", "D"], "answer": "A"}}
+    2. GRAMMAR: 3 fill-in-the-blank questions. Format: {{"sentence": "She ____ (go) yesterday.", "answer": "went"}}
+    3. SPEAKING_TOPIC: A simple string topic (e.g. "My favorite food").
+    
+    OUTPUT RAW JSON ONLY. NO MARKKDOWN.
     """
     try:
         res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user", "content":prompt}])
-        return strict_json_parse(res.choices[0].message.content)
-    except:
+        data = strict_json_parse(res.choices[0].message.content)
+        
+        # --- FIX: KEY NORMALIZATION (Büyük/Küçük harf sorununu çöz) ---
+        normalized_data = {}
+        for k, v in data.items():
+            normalized_data[k.upper()] = v
+            
+        # Eksik anahtar kontrolü
+        if "VOCABULARY" not in normalized_data: normalized_data["VOCABULARY"] = []
+        if "GRAMMAR" not in normalized_data: normalized_data["GRAMMAR"] = []
+        if "SPEAKING_TOPIC" not in normalized_data: normalized_data["SPEAKING_TOPIC"] = "Describe your daily routine."
+        
+        return normalized_data
+    except Exception as e:
+        print(f"Exam Gen Error: {e}")
         return None
 
 # --- SRS MANTIĞI: SM-2 ALGORİTMASI ---
@@ -294,7 +311,6 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
     save_data(user_data)
 
     if mode == "EXAM":
-        # Sınav mantığı artık ayrı bir akışta yönetiliyor, burası kullanılmayabilir ama fallback olarak kalsın.
         system_role = f"ACT AS: Strict Examiner. LEVEL: {full_level_desc}. SCENARIO: {scenario}. CRITICAL: Ask concise questions. Do not give feedback."
     else:
         system_role = f"""
@@ -366,8 +382,9 @@ if api_key:
         
         # --- EXAM MODE TRIGGER ---
         if st.button("📝 Take Level Exam", type="primary", use_container_width=True):
-            st.session_state.exam_active = True # Flag'i aç
-            st.session_state.lesson_active = False # Diğer dersi kapat
+            st.session_state.exam_active = True 
+            st.session_state.lesson_active = False
+            st.session_state.exam_data = None # Reset
             st.rerun()
         st.divider()
         
@@ -380,17 +397,22 @@ if api_key:
             with st.spinner(f"Preparing {user_data['current_level']} Exam..."):
                 st.session_state.exam_data = generate_exam_questions(client, user_data["current_level"])
                 st.session_state.exam_answers = {}
-                st.session_state.exam_step = 1 # 1: Vocab, 2: Grammar, 3: Speaking, 4: Result
-                if not st.session_state.exam_data:
-                    st.error("Exam generation failed. Please try again.")
-                    if st.button("Exit"): 
+                st.session_state.exam_step = 1 
+                
+                # --- HATA YAKALAMA VE RETRY ---
+                if not st.session_state.exam_data or not st.session_state.exam_data.get("VOCABULARY"):
+                    st.error("⚠️ Sınav yüklenirken hata oluştu.")
+                    if st.button("♻️ Tekrar Dene"):
+                        st.session_state.exam_data = None
+                        st.rerun()
+                    if st.button("Çıkış"):
                         st.session_state.exam_active = False
                         st.rerun()
         
         data = st.session_state.exam_data
         
         # 2. ADIMLAR
-        if data:
+        if data and data.get("VOCABULARY"):
             # --- VOCAB ---
             if st.session_state.exam_step == 1:
                 st.subheader("Part 1: Vocabulary")
@@ -421,7 +443,12 @@ if api_key:
             elif st.session_state.exam_step == 3:
                 st.subheader("Part 3: Speaking")
                 st.progress(90)
+                
+                # Default değer ataması (Hata önleyici)
                 topic = data.get("SPEAKING_TOPIC", "Describe your day.")
+                # Eğer topic string değilse (list gelirse) stringe çevir
+                if isinstance(topic, list): topic = topic[0]
+                
                 st.info(f"🎙️ **TOPIC:** {topic}")
                 st.write("Record your answer (min 30 seconds).")
                 
@@ -466,7 +493,7 @@ if api_key:
 
             # --- RESULT ---
             elif st.session_state.exam_step == 4:
-                res = st.session_state.exam_result
+                res = st.session_state.exam_result or {}
                 st.balloons()
                 st.title(f"📊 Result: {res.get('total_score', 0)}/100")
                 
