@@ -13,7 +13,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v32 - Exam Master Pro", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v33 - Level Assessment", page_icon="🧠", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- KELİME HAVUZU (HARDCODED) ---
@@ -128,18 +128,17 @@ def save_data(data):
 
 def strict_json_parse(text):
     text = text.strip()
-    # Markdown bloklarını temizle
-    if "```" in text:
-        text = re.sub(r"```(json)?", "", text).replace("```", "").strip()
-    
-    # Sadece ilk { ve son } arasını al (Güçlü Parser)
+    if text.startswith("```"):
+        text = re.sub(r"^```(json)?|```$", "", text, flags=re.MULTILINE).strip()
     try:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start != -1 and end != -1:
-            json_str = text[start:end]
-            return json.loads(json_str)
-        else:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start != -1 and end != -1:
+                return json.loads(text[start:end])
+        except:
             return {}
     except:
         return {}
@@ -176,7 +175,7 @@ def generate_dynamic_vocab(client, scenario, level, user_data):
     except:
         return candidates[:5]
 
-# --- GÜNCELLENMİŞ SINAV SORUSU ÜRETME (15'er Soru) ---
+# --- SINAV SORUSU ÜRETME (15'er Soru) ---
 def generate_exam_questions(client, level):
     prompt = f"""
     Create a comprehensive {level} level English exam JSON structure.
@@ -194,7 +193,6 @@ def generate_exam_questions(client, level):
         res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user", "content":prompt}])
         data = strict_json_parse(res.choices[0].message.content)
         
-        # KEY NORMALIZATION
         normalized_data = {}
         for k, v in data.items():
             normalized_data[k.upper()] = v
@@ -296,10 +294,7 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
     else:
         completed_scenarios = [h.get("topic") for h in user_data.get("lesson_history", [])]
         available_scenarios = [s for s in SCENARIO_POOL if s not in completed_scenarios]
-        
-        if not available_scenarios:
-            available_scenarios = SCENARIO_POOL
-            
+        if not available_scenarios: available_scenarios = SCENARIO_POOL
         scenario = random.choice(available_scenarios)
 
     target_vocab = generate_dynamic_vocab(client, scenario, level, user_data)
@@ -310,7 +305,7 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
     save_data(user_data)
 
     if mode == "EXAM":
-        system_role = f"ACT AS: Strict Examiner. LEVEL: {full_level_desc}. SCENARIO: {scenario}. CRITICAL: Ask concise questions. Do not give feedback."
+        system_role = "ACT AS: Strict Examiner." 
     else:
         system_role = f"""
         ACT AS A ROLEPLAYER for: '{scenario}'. 
@@ -378,27 +373,24 @@ if api_key:
         st.caption(f"Lessons Completed: {user_data['lessons_completed']}")
 
         st.divider()
-        
-        # --- EXAM MODE TRIGGER ---
         if st.button("📝 Take Level Exam", type="primary", use_container_width=True):
             st.session_state.exam_active = True 
             st.session_state.lesson_active = False
-            st.session_state.exam_data = None # Reset
+            st.session_state.exam_data = None
             st.rerun()
         st.divider()
         
     # --- EĞER SINAV MODU AKTİFSE ---
     if st.session_state.get("exam_active", False):
-        st.title("📝 Comprehensive Level Exam")
+        st.title("📝 Level Assessment Exam")
         
         # 1. SINAV VERİSİNİ OLUŞTUR
         if "exam_data" not in st.session_state or st.session_state.exam_data is None:
-            with st.spinner(f"Preparing {user_data['current_level']} Exam (This might take a moment)..."):
+            with st.spinner(f"Preparing comprehensive {user_data['current_level']} Exam (15+ Questions)..."):
                 st.session_state.exam_data = generate_exam_questions(client, user_data["current_level"])
                 st.session_state.exam_answers = {}
                 st.session_state.exam_step = 1 
                 
-                # --- HATA YAKALAMA VE RETRY ---
                 if not st.session_state.exam_data or not st.session_state.exam_data.get("VOCABULARY"):
                     st.error("⚠️ Sınav yüklenirken hata oluştu.")
                     if st.button("♻️ Tekrar Dene"):
@@ -410,14 +402,12 @@ if api_key:
         
         data = st.session_state.exam_data
         
-        # 2. ADIMLAR
         if data and data.get("VOCABULARY"):
             # --- VOCAB (15 Soru) ---
             if st.session_state.exam_step == 1:
                 st.subheader("Part 1: Vocabulary (15 Questions)")
                 st.progress(33)
                 with st.form("exam_vocab"):
-                    # 15 soruya kadar listele
                     for i, q in enumerate(data.get("VOCABULARY", [])[:15]): 
                         st.write(f"**{i+1}.** {q['question']}")
                         st.session_state.exam_answers[f"v_{i}"] = st.radio(f"Select option for Q{i+1}", q['options'], key=f"v_radio_{i}", label_visibility="collapsed")
@@ -441,7 +431,7 @@ if api_key:
 
             # --- SPEAKING (Süre Kontrollü) ---
             elif st.session_state.exam_step == 3:
-                st.subheader("Part 3: Speaking")
+                st.subheader("Part 3: Speaking Assessment")
                 st.progress(90)
                 
                 topic = data.get("SPEAKING_TOPIC", "Describe your day.")
@@ -453,13 +443,12 @@ if api_key:
                 audio = mic_recorder(start_prompt="🎤 Start Recording", stop_prompt="⏹️ Finish Exam")
                 
                 if audio:
-                    # SÜRE KONTROLÜ (Whisper Verbose)
-                    with st.spinner("Ses analiz ediliyor..."):
+                    with st.spinner("Ses analiz ediliyor ve seviye belirleniyor..."):
                         bio = io.BytesIO(audio['bytes'])
                         bio.name = "exam.webm"
                         
                         try:
-                            # Sadece süreyi öğrenmek için hızlı bir call
+                            # Sadece süreyi ve metni al
                             transcription = client.audio.transcriptions.create(
                                 model="whisper-1", 
                                 file=bio, 
@@ -469,45 +458,38 @@ if api_key:
                             duration = transcription.duration
                             
                             if duration < 15:
-                                st.error(f"❌ Kayıt çok kısa ({duration:.1f} sn). Lütfen daha uzun konuşun.")
+                                st.error(f"❌ Kayıt çok kısa ({duration:.1f} sn). Lütfen en az 15 saniye konuşun.")
                             else:
                                 st.session_state.exam_answers["speaking_text"] = transcription.text
                                 
-                                # PUANLAMA MANTIĞI
+                                # --- YENİ DEĞERLENDİRME MANTIĞI ---
                                 prompt = f"""
-                                Grade this exam for level {user_data['current_level']}.
-                                
-                                SCORING WEIGHTS:
-                                - Vocabulary Section (15 Qs): Max 30 points (approx 2 pts each)
-                                - Grammar Section (15 Qs): Max 30 points (approx 2 pts each)
-                                - Speaking Section: Max 40 points
-                                TOTAL: 100 Points.
-                                
+                                You are a professional English Examiner.
+                                Current Student Level: {user_data['current_level']}.
+
                                 EXAM DATA: {json.dumps(data)}
                                 USER ANSWERS: {json.dumps(st.session_state.exam_answers)}
-                                
-                                DECISION RULE: If Total Score >= 70, suggest moving to next level (e.g. A2 -> B1).
-                                
-                                OUTPUT JSON:
+
+                                TASK: Evaluate the student based on Vocabulary, Grammar and Speaking performance.
+                                Determine their exact proficiency level (e.g. {user_data['current_level']} Low, {user_data['current_level']} Mid, {user_data['current_level']} High, or Next Level).
+
+                                OUTPUT JSON ONLY:
                                 {{
-                                    "vocab_score": 0, 
-                                    "grammar_score": 0, 
-                                    "speaking_score": 0,
-                                    "total_score": 0, 
-                                    "feedback": "Turkish feedback summary",
-                                    "new_level": "B1" 
+                                    "assessed_level": "A2 High", // Example values: A2 Low, A2 Mid, B1 Low...
+                                    "feedback": "Detailed feedback in Turkish."
                                 }}
                                 """
                                 res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user", "content":prompt}])
                                 result = strict_json_parse(res.choices[0].message.content)
                                 
-                                # LEVEL UPDATE
-                                if result and result.get("new_level") and result["new_level"] != user_data["current_level"]:
-                                    if result.get("total_score", 0) >= 70:
-                                        user_data["current_level"] = result["new_level"]
+                                # Seviye güncelleme (Otomatik)
+                                if result and "assessed_level" in result:
+                                    # Eğer seviye yükseldiyse kaydet
+                                    new_lvl = result["assessed_level"].split()[0] # "B1 High" -> "B1"
+                                    if new_lvl != user_data["current_level"]:
+                                        user_data["current_level"] = new_lvl
                                         save_data(user_data)
-                                        st.balloons()
-                                        st.toast(f"🎉 LEVEL UP! New Level: {result['new_level']}")
+                                        st.toast(f"🎉 SEVİYE GÜNCELLENDİ: {new_lvl}")
                                 
                                 st.session_state.exam_result = result
                                 st.session_state.exam_step = 4
@@ -515,20 +497,16 @@ if api_key:
                         except Exception as e:
                             st.error(f"Hata oluştu: {e}")
 
-            # --- RESULT ---
+            # --- RESULT (YENİ GÖRÜNÜM) ---
             elif st.session_state.exam_step == 4:
                 res = st.session_state.exam_result or {}
-                if "total_score" not in res: res["total_score"] = 0 # Fallback
+                st.balloons()
                 
-                st.title(f"📊 Result: {res.get('total_score')}/100")
+                # Seviye Gösterimi
+                lvl = res.get('assessed_level', 'Belirlenemedi')
+                st.markdown(f"<h1 style='text-align: center; color: #4F8BF9;'>🎓 Seviyeniz: {lvl}</h1>", unsafe_allow_html=True)
                 
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Vocab (Max 30)", res.get('vocab_score', 0))
-                c2.metric("Grammar (Max 30)", res.get('grammar_score', 0))
-                c3.metric("Speaking (Max 40)", res.get('speaking_score', 0))
-                
-                st.success(f"**Current Level:** {user_data['current_level']}")
-                st.info(res.get('feedback', ''))
+                st.info(f"**Geri Bildirim:**\n{res.get('feedback', '')}")
                 
                 if st.button("Exit Exam"):
                     st.session_state.exam_active = False
@@ -539,7 +517,6 @@ if api_key:
     else:
         page = st.sidebar.radio("📌 Menu", ["🎭 Scenario Coach", "👂 Listening Quiz", "🧠 Vocab Gym (Anki)", "📜 History & Stats"])
 
-        # --- LISTENING QUIZ ---
         if page == "👂 Listening Quiz":
             st.title("👂 Listening & Dictation")
             if "quiz_text" not in st.session_state:
@@ -574,7 +551,6 @@ if api_key:
                     else:
                         st.error(f"❌ Correct: {st.session_state.quiz_text}")
 
-        # --- VOCAB GYM (SRS ANKI STYLE) ---
         elif page == "🧠 Vocab Gym (Anki)":
             st.title("🧠 Vocabulary Gym (Anki SM-2)")
 
@@ -682,7 +658,6 @@ if api_key:
                             st.session_state.srs_revealed = False
                             st.rerun()
 
-        # --- HISTORY & STATS ---
         elif page == "📜 History & Stats":
             st.title("📜 Progress Log")
             st.subheader("📅 Daily Vocabulary Growth")
@@ -715,7 +690,6 @@ if api_key:
                     st.success(f"**Artılar:** {', '.join(h.get('feedback_pros', []))}")
                     st.error(f"**Eksiler:** {', '.join(h.get('feedback_cons', []))}")
 
-        # --- SCENARIO COACH ---
         elif page == "🎭 Scenario Coach":
             st.title("🗣️ AI Roleplay Coach")
 
@@ -744,7 +718,6 @@ if api_key:
                     else:
                         completed_scenarios = [h.get("topic") for h in user_data.get("lesson_history", [])]
                         available_scenarios = [s for s in SCENARIO_POOL if s not in completed_scenarios]
-                        
                         if not available_scenarios: available_scenarios = SCENARIO_POOL
                         st.session_state.temp_scenario = random.choice(available_scenarios)
                 
