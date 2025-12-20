@@ -728,10 +728,12 @@ if api_key:
                         submitted = st.form_submit_button("🏁 FINISH & GRADE")
 
                     if submitted:
-                        with st.spinner("Analyzing Performance (Speaking + Reading)..."):
+                        with st.spinner("Detaylı Performans Analizi Yapılıyor (CEFR Standartları)..."):
                             r_text = st.session_state.reading_content.get("text", "")
                             r_qs = st.session_state.reading_content.get("questions", [])
+                            target_words = st.session_state.target_vocab
                             
+                            # Kullanıcı cevaplarını hazırla
                             user_answers_with_context = []
                             for i, ans in enumerate(ans_list):
                                 q_text = r_qs[i] if i < len(r_qs) else f"Question {i+1}"
@@ -740,40 +742,51 @@ if api_key:
                                     "user_answer": ans
                                 })
 
+                            # --- GELİŞMİŞ PUANLAMA PROMPT'U ---
                             prompt = f"""
-                            ACT AS AN EXAMINER. Analyze the User's performance based on:
-                            1. The CHAT HISTORY provided in the messages (Speaking Skills).
-                            2. The READING TASK details provided below (Reading Skills).
+                            ACT AS A STRICT IELTS/CEFR EXAMINER. 
+                            Analyze the User's performance based on the CHAT HISTORY and READING TASK.
 
-                            --- READING TASK DATA ---
-                            TEXT: "{r_text}"
-                            USER ANSWERS: {json.dumps(user_answers_with_context)}
-                            -------------------------
+                            --- DATA ---
+                            TARGET VOCABULARY: {json.dumps(target_words)}
+                            READING TEXT: "{r_text}"
+                            READING ANSWERS: {json.dumps(user_answers_with_context)}
+                            ------------
 
-                            SCORING RULES:
-                            - Speaking Score (0-100): Based on grammar, vocabulary, fluency in Chat History.
-                            - Reading Score (0-100): Check if USER ANSWERS are correct according to the TEXT.
-                            - Final Score = (Speaking * 0.8) + (Reading * 0.2).
+                            SCORING RUBRIC (Total 100 Points):
+                            1. GRAMMAR & ACCURACY (0-20 pts): Correct verb tenses, prepositions, sentence structure.
+                            2. VOCABULARY RANGE (0-20 pts): Variety of words AND usage of 'TARGET VOCABULARY'.
+                            3. FLUENCY & RELEVANCE (0-20 pts): Did the user answer relevantly? Were sentences complete?
+                            4. TASK ACHIEVEMENT (0-20 pts): Did they successfully complete the roleplay scenario goal?
+                            5. READING COMPREHENSION (0-20 pts): Are the answers to reading questions correct based on the text?
 
                             OUTPUT JSON FORMAT (Strict):
                             {{
-                                "score": 0, 
-                                "speaking_score": 0, 
-                                "reading_score": 0,
+                                "scores": {{
+                                    "grammar": 0,
+                                    "vocabulary": 0,
+                                    "fluency": 0,
+                                    "task_achievement": 0,
+                                    "reading": 0,
+                                    "total_score": 0
+                                }},
+                                "used_target_words": ["word1", "word2"],
                                 "reading_feedback": [
                                     {{
                                         "question": "...",
                                         "user_answer": "...",
                                         "correct_answer": "...",
-                                        "is_correct": true/false
+                                        "is_correct": true
                                     }}
                                 ],
-                                "pros": ["Olumlu yön 1 (Türkçe)", "Olumlu yön 2 (Türkçe)"], 
-                                "cons": ["Geliştirilmeli 1 (Türkçe)", "Geliştirilmeli 2 (Türkçe)"], 
-                                "grammar_topics": ["Topic to study"],
+                                "detailed_feedback": {{
+                                    "grammar_review": "Turkish comment on grammar mistakes",
+                                    "vocabulary_tips": "Turkish comment on better word choices",
+                                    "general_pros": ["Tr Pro 1", "Tr Pro 2"],
+                                    "general_cons": ["Tr Con 1", "Tr Con 2"]
+                                }},
                                 "next_lesson_homework": {{"scenario": "...", "vocab": ["..."]}}
                             }}
-                            IMPORTANT: Provide 'pros' and 'cons' comments in TURKISH.
                             """
                             
                             msgs = st.session_state.messages + [{"role":"system","content":prompt}]
@@ -781,22 +794,22 @@ if api_key:
                             try:
                                 res = client.chat.completions.create(model="gpt-4o", messages=msgs)
                                 rep = strict_json_parse(res.choices[0].message.content)
-                                if not rep: 
-                                    rep = {"score": 0, "speaking_score": 0, "reading_score": 0, "pros": ["Hata"], "cons": ["Hata"]}
+                                if not rep: raise Exception("Boş JSON")
 
+                                # İstatistikleri Kaydet
                                 user_data["lessons_completed"] += 1
                                 if "next_lesson_homework" in rep: 
                                     user_data["next_lesson_prep"] = rep["next_lesson_homework"]
                                 
+                                # Tarihçeye detaylı kaydet
                                 hist = {
                                     "date": datetime.now().strftime("%Y-%m-%d"),
                                     "topic": st.session_state.scenario,
-                                    "score": rep.get("score"),
-                                    "speaking_score": rep.get("speaking_score"),
-                                    "reading_score": rep.get("reading_score"),
+                                    "score": rep["scores"]["total_score"],
+                                    "breakdown": rep["scores"], # Detaylı puanlar
                                     "words": st.session_state.target_vocab,
-                                    "feedback_pros": rep.get("pros", []),
-                                    "feedback_cons": rep.get("cons", [])
+                                    "feedback_pros": rep["detailed_feedback"]["general_pros"],
+                                    "feedback_cons": rep["detailed_feedback"]["general_cons"]
                                 }
                                 user_data["lesson_history"].append(hist)
                                 save_data(user_data)
@@ -805,7 +818,7 @@ if api_key:
                                 st.session_state.reading_completed = True
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Analysis Error: {e}")
+                                st.error(f"Analiz Hatası: {e}")
 
                 else:
                     rep = st.session_state.final_report
@@ -842,3 +855,4 @@ if api_key:
                         st.rerun()
 else:
     st.warning("Enter API Key")
+
