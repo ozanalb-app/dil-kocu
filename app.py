@@ -350,6 +350,20 @@ if api_key:
     # --- LISTENING QUIZ ---
     if page == "👂 Listening Quiz":
         st.title("👂 Listening & Dictation")
+        # --- VOCAB GYM (SRS ANKI STYLE) ---
+    elif page == "🧠 Vocab Gym (Anki)":
+        st.title("🧠 Vocabulary Gym (Anki SM-2)")
+        
+        # --- EKLENEN KISIM: ÇIKIŞ BUTONU ---
+        if st.button("🚪 Quit / Reset", type="secondary", key="vocab_exit"):
+            st.session_state.srs_active_card = None
+            st.session_state.srs_revealed = False
+            st.session_state.srs_audio = None
+            st.rerun()
+        # -----------------------------------
+        
+        if "srs_active_card" not in st.session_state:
+            # ... kod devam ediyor ...
         if "quiz_text" not in st.session_state:
             st.session_state.quiz_text = None
             st.session_state.quiz_audio = None
@@ -820,3 +834,4 @@ if api_key:
                         st.rerun()
 else:
     st.warning("Enter API Key")
+
