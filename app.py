@@ -11,7 +11,7 @@ import re
 from datetime import datetime, timedelta
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v28 - Pro Edition", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v29 - Ultimate SRS", page_icon="🧠", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- KELİME HAVUZU (HARDCODED) ---
@@ -57,6 +57,9 @@ _BANNED_PATTERNS = [re.compile(rf"\b{re.escape(p.lower())}\b") for p in BANNED_P
 # --- 2. SENARYO HAVUZU ---
 SCENARIO_POOL = [
     "Parent teacher meeting",
+    "Traffic stop bu police",
+    "Traffic accident, conversation with other driver",
+    "Sending package from post office",
     "Coffee Shop: Ordering a Latte with Oat Milk",
     "Hotel Reception: Checking in and Asking for Wi-Fi",
     "Street: Asking a Stranger for Directions to the Metro",
@@ -99,7 +102,7 @@ def load_data():
             "completed_scenarios": [],
             "lesson_history": [],
             "next_lesson_prep": None,
-            "used_words": [] # Yeni: Kullanılmış kelimeleri takip et
+            "used_words": []
         }
     with open(DATA_FILE, "r") as f:
         data = json.load(f)
@@ -135,68 +138,107 @@ def determine_sub_level(level, lessons_completed):
     else: return "High"
 
 def generate_dynamic_vocab(client, scenario, level, user_data):
-    """
-    Havuzdan (STATIC_VOCAB_POOL) henüz kullanılmamış kelimeleri seçer.
-    GPT-4o bu aday havuzundan senaryoya en uygun 5 tanesini belirler.
-    """
     used = set(user_data.get("used_words", []))
     available = [w for w in STATIC_VOCAB_POOL if w not in used]
     
-    # Eğer havuz tükenmek üzereyse sıfırla veya rastgele seç
     if len(available) < 10:
         available = STATIC_VOCAB_POOL
-        user_data["used_words"] = [] # Reset döngüsü
+        user_data["used_words"] = [] 
     
-    # Adayları karıştır ve ilk 50 tanesini GPT'ye sun (token tasarrufu)
     random.shuffle(available)
     candidates = available[:60]
     
     prompt = f"""
     Select exactly 5 English words from this list that are MOST relevant to the scenario: "{scenario}".
     CANDIDATES: {', '.join(candidates)}
-    
     OUTPUT ONLY A JSON ARRAY of strings. Example: ["word1", "word2", "word3", "word4", "word5"]
     """
     try:
         res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": prompt}])
         words = strict_json_parse(res.choices[0].message.content)
         if isinstance(words, list) and len(words) > 0:
-            # Seçilenleri kullanılanlara ekle
             return words[:5]
         else:
             return candidates[:5]
     except:
         return candidates[:5]
 
-# --- SRS MANTIĞI ---
-def get_srs_card(data):
+# --- SRS MANTIĞI (GELİŞMİŞ) ---
+def get_next_srs_card(data, session_seen):
+    """
+    1. Öncelik: Tekrar zamanı gelmiş (Due) kartlar.
+    2. Öncelik: Havuzdan hiç çalışılmamış (New) kartlar.
+    3. Kural: session_seen setindeki (bu oturumda sorulan) kelimeleri atla.
+    """
     now = time.time()
     srs_list = data.get("vocab_srs", [])
-    due_cards = [card for card in srs_list if card.get("next_review_ts", 0) <= now]
+    
+    # 1. DUE CARDS
+    due_cards = [
+        card for card in srs_list 
+        if card.get("next_review_ts", 0) <= now and card["word"] not in session_seen
+    ]
+    
     if due_cards:
-        return random.choice(due_cards)
-    return None
+        return random.choice(due_cards), "review"
+    
+    # 2. NEW CARDS
+    # SRS listesinde olmayan kelimeleri bul
+    srs_words = {c["word"] for c in srs_list}
+    new_candidates = [
+        w for w in STATIC_VOCAB_POOL 
+        if w not in srs_words and w not in session_seen
+    ]
+    
+    if new_candidates:
+        return {"word": random.choice(new_candidates)}, "new"
+    
+    # 3. FALLBACK (Hepsini bitirdiysen rastgele sor ama oturumda sorulmamış olsun)
+    available_srs = [c for c in srs_list if c["word"] not in session_seen]
+    if available_srs:
+        return random.choice(available_srs), "review"
+        
+    return None, None
 
 def update_srs_card(data, word_obj, is_correct):
     srs_list = data.get("vocab_srs", [])
     existing_idx = next((i for i, item in enumerate(srs_list) if item["word"] == word_obj["word"]), -1)
     
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    
     if existing_idx == -1:
+        # Yeni kelime oluşturma
         card = word_obj.copy()
         card["box"] = 0
+        card["times_seen"] = 0
+        card["history"] = []
     else:
         card = srs_list[existing_idx]
 
-    intervals = [1, 3, 7, 14, 30]
+    # İstatistik Güncelleme
+    card["times_seen"] = card.get("times_seen", 0) + 1
+    card["last_review"] = now_str
+    if "history" not in card: card["history"] = []
+    
+    history_entry = {
+        "date": now_str,
+        "result": "Correct" if is_correct else "Incorrect"
+    }
+    card["history"].append(history_entry)
+
+    # Leitner Algoritması
+    intervals = [1, 3, 7, 14, 30] # Günler
+    
     if is_correct:
         card["box"] = min(card.get("box", 0) + 1, 5)
     else:
-        card["box"] = 1 
+        card["box"] = 1 # Unuttuysan başa sar
 
     days_to_add = intervals[card["box"] - 1] if card["box"] > 0 else 0.5
     next_ts = time.time() + (days_to_add * 24 * 60 * 60)
     card["next_review_ts"] = next_ts
     
+    # Listeye Geri Yaz
     if existing_idx == -1:
         srs_list.append(card)
     else:
@@ -212,13 +254,10 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
     sub_level = determine_sub_level(level, user_data["lessons_completed"])
     full_level_desc = f"{level} ({sub_level})"
     
-    # Senaryo Belirleme
     scenario = forced_scenario if forced_scenario else random.choice(SCENARIO_POOL)
-
-    # Hedef Kelimeler (Havuzdan seçilenler)
     target_vocab = generate_dynamic_vocab(client, scenario, level, user_data)
     
-    # Kullanılanları kaydet
+    # Senaryoda kullanılanları da basitçe used_words'e ekliyoruz ki kelime havuzunda dönsün
     for w in target_vocab:
         if w not in user_data["used_words"]:
             user_data["used_words"].append(w)
@@ -227,13 +266,12 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
     if mode == "EXAM":
         system_role = f"ACT AS: Strict Examiner. LEVEL: {full_level_desc}. SCENARIO: {scenario}. CRITICAL: Ask concise questions. Do not give feedback."
     else:
-        # --- ÖNEMLİ DEĞİŞİKLİK: ICEBREAKER İÇİN SYSTEM PROMPT ---
         system_role = f"""
         ACT AS A ROLEPLAYER for: '{scenario}'. 
         LEVEL: {full_level_desc}.
         
         **INSTRUCTIONS:**
-        1. FIRST MESSAGE: Ignore the scenario for a second. Start by warmly greeting Pınar and asking: "Hello Pınar, how was your day? Could you tell me what you did?" (in simple English).
+        1. FIRST MESSAGE: Ignore the scenario for a second. Start by warmly greeting Pınar and asking: "Hello Pınar, what did you do today?" (in English).
         2. WAIT for her answer about her day.
         3. AFTER she answers about her day: Acknowledge it briefly, then IMMEDIATELY TRANSITION into the roleplay scenario '{scenario}' as your character.
         
@@ -259,7 +297,6 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
     context_msg = f"{mode_icon}\n**SCENARIO:** {scenario}\n🔑 **WORDS:** {', '.join(target_vocab)}"
     st.session_state.display_messages.append({"role": "info", "content": context_msg})
 
-    # İlk mesajı başlat (Icebreaker ile başlayacak)
     intro_prompt = f"{system_role}\nStart the conversation now with the greeting."
     st.session_state.messages = [{"role": "system", "content": intro_prompt}]
 
@@ -267,7 +304,6 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
         res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
         msg = res.choices[0].message.content
         
-        # İlk mesajın çevirisi
         tr_res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": f"Translate to Turkish: {msg}"}])
         tr_msg = tr_res.choices[0].message.content
 
@@ -347,48 +383,67 @@ if api_key:
     elif page == "🧠 Vocab Gym (SRS)":
         st.title("🧠 Vocabulary Gym (Spaced Repetition)")
         
+        # Session State Init
         if "srs_active_card" not in st.session_state:
             st.session_state.srs_active_card = None
             st.session_state.srs_revealed = False
             st.session_state.srs_audio = None
+        
+        # Bu oturumda sorulanları takip etmek için set (Sayfa yenilenince sıfırlanır)
+        if "gym_session_seen" not in st.session_state:
+            st.session_state.gym_session_seen = set()
 
+        # KART SEÇİMİ
         if st.session_state.srs_active_card is None:
-            due_card = get_srs_card(user_data)
+            card_data, card_type = get_next_srs_card(user_data, st.session_state.gym_session_seen)
             
-            if due_card:
-                st.session_state.srs_active_card = due_card
-                st.session_state.srs_is_new = False
-                st.toast("Eski bir dost (Tekrar Zamanı)", icon="↺")
+            if card_data:
+                # Eğer New ise, GPT'den detaylarını çek
+                if card_type == "new":
+                    with st.spinner(f"Yeni kelime hazırlanıyor: {card_data['word']}..."):
+                        word_choice = card_data['word']
+                        prompt = f"""
+                        Define the English word: "{word_choice}".
+                        TARGET LEVEL: {user_data['current_level']}.
+                        
+                        OUTPUT JSON ONLY:
+                        {{
+                            "word": "{word_choice}",
+                            "tr": "TURKISH TRANSLATION HERE (MUST BE TURKISH)",
+                            "ex": "Short English example sentence"
+                        }}
+                        """
+                        try:
+                            res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":prompt}])
+                            full_card = strict_json_parse(res.choices[0].message.content)
+                            st.session_state.srs_active_card = full_card
+                            st.session_state.srs_is_new = True
+                            st.toast("✨ Yeni Kelime!")
+                        except:
+                            st.error("Bağlantı hatası.")
+                else:
+                    # Review ise zaten datası var
+                    st.session_state.srs_active_card = card_data
+                    st.session_state.srs_is_new = False
+                    st.toast("↺ Tekrar Zamanı!")
+                
+                # Sesi Hazırla
+                if st.session_state.srs_active_card:
+                    # Session setine ekle ki bu oturumda bir daha gelmesin
+                    st.session_state.gym_session_seen.add(st.session_state.srs_active_card["word"])
+                    
+                    word = st.session_state.srs_active_card.get("word", "")
+                    tts = gTTS(text=word, lang='en')
+                    fp = io.BytesIO()
+                    tts.write_to_fp(fp)
+                    st.session_state.srs_audio = fp.getvalue()
             else:
-                with st.spinner("Yeni kelime üretiliyor..."):
-                    # Yeni kelimeyi havuzdan seç
-                    used_in_srs = [c["word"] for c in user_data.get("vocab_srs", [])]
-                    candidates = [w for w in STATIC_VOCAB_POOL if w not in used_in_srs]
-                    if not candidates: candidates = STATIC_VOCAB_POOL # Fallback
-                    word_choice = random.choice(candidates)
+                st.info("🎉 Tebrikler! Şimdilik çalışılacak kelime kalmadı.")
 
-                    prompt = f"""
-                    Define this word: "{word_choice}" (Level {user_data['current_level']}). 
-                    Output JSON: {{ "word": "{word_choice}", "tr": "...", "ex": "..." }}
-                    """
-                    try:
-                        res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":prompt}])
-                        new_card = strict_json_parse(res.choices[0].message.content)
-                        st.session_state.srs_active_card = new_card
-                        st.session_state.srs_is_new = True
-                        st.toast("Yeni Kelime!", icon="✨")
-                    except:
-                        st.error("Bağlantı hatası, tekrar dene.")
-            
-            if st.session_state.srs_active_card:
-                word = st.session_state.srs_active_card.get("word", "")
-                tts = gTTS(text=word, lang='en')
-                fp = io.BytesIO()
-                tts.write_to_fp(fp)
-                st.session_state.srs_audio = fp.getvalue()
-
+        # KART GÖSTERİMİ
         if st.session_state.srs_active_card:
             card = st.session_state.srs_active_card
+            
             st.markdown(
                 f"""
                 <div style="border: 2px solid #4F8BF9; border-radius: 10px; padding: 20px; text-align: center; margin-bottom: 20px;">
@@ -406,13 +461,16 @@ if api_key:
                     st.session_state.srs_revealed = True
                     st.rerun()
             else:
-                st.success(f"🇹🇷 {card.get('tr', '')}")
-                st.info(f"🇬🇧 {card.get('ex', '')}")
+                # CEVAP GÖSTERİMİ
+                st.success(f"🇹🇷 {card.get('tr', 'No Data')}")
+                st.info(f"🇬🇧 {card.get('ex', 'No Data')}")
                 
+                # İSTATİSTİKLER
                 if not st.session_state.srs_is_new:
-                    box = card.get('box', 1)
-                    st.caption(f"📦 Şu anki Kutu: {box}/5")
-
+                    box = card.get('box', 0)
+                    seen = card.get('times_seen', 0)
+                    st.caption(f"📦 Kutu: {box}/5 | 👀 Görülme: {seen} kez")
+                
                 st.markdown("---")
                 c1, c2 = st.columns(2)
                 with c1:
@@ -452,20 +510,16 @@ if api_key:
                 st.progress(prog, text=f"Time: {int(curr)}s / {int(targ)}s")
 
         if not st.session_state.get("lesson_active", False):
-            # --- NEXT MISSION DISPLAY LOGIC ---
-            # Butona basılmadan önce senaryoyu belirle veya mevcut olanı göster
             if "temp_scenario" not in st.session_state or st.session_state.temp_scenario is None:
-                # Surprise yerine direkt seçelim
                 if user_data.get("next_lesson_prep"):
                      st.session_state.temp_scenario = user_data["next_lesson_prep"].get("scenario")
                 else:
                      st.session_state.temp_scenario = random.choice(SCENARIO_POOL)
             
-            # Ekran Kartı
             st.markdown(f"""
             <div style="padding:15px; background-color:#f0f2f6; border-radius:10px; margin-bottom:20px;">
                 <h3>🎯 Next Mission: {st.session_state.temp_scenario}</h3>
-                <p>Start chatting! First, tell me about your day, then we'll dive into the scenario.</p>
+                <p>Start chatting! First, tell me about your day (in English), then we'll dive into the scenario.</p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -478,7 +532,7 @@ if api_key:
             if st.button("🚀 START SCENARIO"):
                 forced = st.session_state.temp_scenario
                 start_lesson_logic(client, user_data["current_level"], "LESSON", mins, forced_scenario=forced)
-                st.session_state.temp_scenario = None # Temizle ki bir sonraki sefer yenisi gelsin
+                st.session_state.temp_scenario = None 
                 st.rerun()
         else:
             if not st.session_state.get("reading_phase", False):
@@ -525,7 +579,6 @@ if api_key:
                     if st.button(btn_text, use_container_width=True, disabled=not time_up):
                         st.session_state.reading_phase = True
                         with st.spinner("Generating reading task..."):
-                            # --- READING PROMPT UPDATE ---
                             prompt = f"""
                             Create a short reading text (approx 150 words) specifically about this scenario: {st.session_state.scenario}. 
                             CRITICAL RULES:
@@ -566,7 +619,6 @@ if api_key:
                                     else:
                                         st.session_state.accumulated_speaking_time += len(txt.split()) * 0.7
                                         
-                                        # --- GRAMMAR CHECK UPDATE ---
                                         corr = None
                                         try:
                                             p_check = f"""
@@ -621,12 +673,9 @@ if api_key:
 
                     if submitted:
                         with st.spinner("Analyzing Performance (Speaking + Reading)..."):
-                            # --- FIX: READING DATASINI HAZIRLA ---
-                            # AI'ya metni ve soruları hatırlatmamız lazım, yoksa sadece cevapları görür.
                             r_text = st.session_state.reading_content.get("text", "")
                             r_qs = st.session_state.reading_content.get("questions", [])
                             
-                            # Kullanıcının cevaplarını soru sırasına göre eşleştir
                             user_answers_with_context = []
                             for i, ans in enumerate(ans_list):
                                 q_text = r_qs[i] if i < len(r_qs) else f"Question {i+1}"
@@ -635,7 +684,6 @@ if api_key:
                                     "user_answer": ans
                                 })
 
-                            # --- ANALİZ PROMPT ---
                             prompt = f"""
                             ACT AS AN EXAMINER. Analyze the User's performance based on:
                             1. The CHAT HISTORY provided in the messages (Speaking Skills).
@@ -664,21 +712,18 @@ if api_key:
                                         "is_correct": true/false
                                     }}
                                 ],
-                                "pros": ["Strong point 1", "Strong point 2"], 
-                                "cons": ["Weak point 1", "Weak point 2"], 
+                                "pros": ["Strong point 1"], 
+                                "cons": ["Weak point 1"], 
                                 "grammar_topics": ["Topic to study"],
                                 "next_lesson_homework": {{"scenario": "...", "vocab": ["..."]}}
                             }}
                             """
                             
-                            # Mesaj geçmişini alıp sonuna analiz promptunu ekliyoruz
                             msgs = st.session_state.messages + [{"role":"system","content":prompt}]
 
                             try:
                                 res = client.chat.completions.create(model="gpt-4o", messages=msgs)
                                 rep = strict_json_parse(res.choices[0].message.content)
-                                
-                                # Eğer AI boş dönerse varsayılan değer ata
                                 if not rep: 
                                     rep = {
                                         "score": 0, 
@@ -740,6 +785,3 @@ if api_key:
                         st.rerun()
 else:
     st.warning("Enter API Key")
-
-
-
