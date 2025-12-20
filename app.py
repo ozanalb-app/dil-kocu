@@ -13,7 +13,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v31.1 - Exam Fix", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v32 - Exam Master Pro", page_icon="🧠", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- KELİME HAVUZU (HARDCODED) ---
@@ -132,7 +132,7 @@ def strict_json_parse(text):
     if "```" in text:
         text = re.sub(r"```(json)?", "", text).replace("```", "").strip()
     
-    # Sadece ilk { ve son } arasını al
+    # Sadece ilk { ve son } arasını al (Güçlü Parser)
     try:
         start = text.find("{")
         end = text.rfind("}") + 1
@@ -176,30 +176,29 @@ def generate_dynamic_vocab(client, scenario, level, user_data):
     except:
         return candidates[:5]
 
-# --- SINAV SORUSU ÜRETME FONKSİYONU ---
+# --- GÜNCELLENMİŞ SINAV SORUSU ÜRETME (15'er Soru) ---
 def generate_exam_questions(client, level):
     prompt = f"""
-    Create a {level} level English exam JSON structure.
+    Create a comprehensive {level} level English exam JSON structure.
     
     IMPORTANT: The keys MUST be exactly "VOCABULARY", "GRAMMAR", "SPEAKING_TOPIC".
     
     Structure:
-    1. VOCABULARY: 3 multiple-choice questions. Format: {{"question": "Meaning of 'word'?", "options": ["A", "B", "C", "D"], "answer": "A"}}
-    2. GRAMMAR: 3 fill-in-the-blank questions. Format: {{"sentence": "She ____ (go) yesterday.", "answer": "went"}}
-    3. SPEAKING_TOPIC: A simple string topic (e.g. "My favorite food").
+    1. VOCABULARY: 15 multiple-choice questions. Format: {{"question": "Meaning of 'word'?", "options": ["A", "B", "C", "D"], "answer": "A"}}
+    2. GRAMMAR: 15 fill-in-the-blank questions. Format: {{"sentence": "She ____ (go) yesterday.", "answer": "went"}}
+    3. SPEAKING_TOPIC: A simple string topic (e.g. "Talk about your favorite holiday").
     
-    OUTPUT RAW JSON ONLY. NO MARKKDOWN.
+    OUTPUT RAW JSON ONLY. NO MARKDOWN.
     """
     try:
         res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user", "content":prompt}])
         data = strict_json_parse(res.choices[0].message.content)
         
-        # --- FIX: KEY NORMALIZATION (Büyük/Küçük harf sorununu çöz) ---
+        # KEY NORMALIZATION
         normalized_data = {}
         for k, v in data.items():
             normalized_data[k.upper()] = v
             
-        # Eksik anahtar kontrolü
         if "VOCABULARY" not in normalized_data: normalized_data["VOCABULARY"] = []
         if "GRAMMAR" not in normalized_data: normalized_data["GRAMMAR"] = []
         if "SPEAKING_TOPIC" not in normalized_data: normalized_data["SPEAKING_TOPIC"] = "Describe your daily routine."
@@ -394,7 +393,7 @@ if api_key:
         
         # 1. SINAV VERİSİNİ OLUŞTUR
         if "exam_data" not in st.session_state or st.session_state.exam_data is None:
-            with st.spinner(f"Preparing {user_data['current_level']} Exam..."):
+            with st.spinner(f"Preparing {user_data['current_level']} Exam (This might take a moment)..."):
                 st.session_state.exam_data = generate_exam_questions(client, user_data["current_level"])
                 st.session_state.exam_answers = {}
                 st.session_state.exam_step = 1 
@@ -413,12 +412,13 @@ if api_key:
         
         # 2. ADIMLAR
         if data and data.get("VOCABULARY"):
-            # --- VOCAB ---
+            # --- VOCAB (15 Soru) ---
             if st.session_state.exam_step == 1:
-                st.subheader("Part 1: Vocabulary")
+                st.subheader("Part 1: Vocabulary (15 Questions)")
                 st.progress(33)
                 with st.form("exam_vocab"):
-                    for i, q in enumerate(data.get("VOCABULARY", [])):
+                    # 15 soruya kadar listele
+                    for i, q in enumerate(data.get("VOCABULARY", [])[:15]): 
                         st.write(f"**{i+1}.** {q['question']}")
                         st.session_state.exam_answers[f"v_{i}"] = st.radio(f"Select option for Q{i+1}", q['options'], key=f"v_radio_{i}", label_visibility="collapsed")
                         st.write("---")
@@ -426,12 +426,12 @@ if api_key:
                         st.session_state.exam_step = 2
                         st.rerun()
 
-            # --- GRAMMAR ---
+            # --- GRAMMAR (15 Soru) ---
             elif st.session_state.exam_step == 2:
-                st.subheader("Part 2: Grammar")
+                st.subheader("Part 2: Grammar (15 Questions)")
                 st.progress(66)
                 with st.form("exam_grammar"):
-                    for i, q in enumerate(data.get("GRAMMAR", [])):
+                    for i, q in enumerate(data.get("GRAMMAR", [])[:15]):
                         st.write(f"**{i+1}.** {q['sentence']}")
                         st.session_state.exam_answers[f"g_{i}"] = st.text_input(f"Answer for Q{i+1}", key=f"g_input_{i}")
                         st.write("---")
@@ -439,70 +439,95 @@ if api_key:
                         st.session_state.exam_step = 3
                         st.rerun()
 
-            # --- SPEAKING ---
+            # --- SPEAKING (Süre Kontrollü) ---
             elif st.session_state.exam_step == 3:
                 st.subheader("Part 3: Speaking")
                 st.progress(90)
                 
-                # Default değer ataması (Hata önleyici)
                 topic = data.get("SPEAKING_TOPIC", "Describe your day.")
-                # Eğer topic string değilse (list gelirse) stringe çevir
                 if isinstance(topic, list): topic = topic[0]
                 
                 st.info(f"🎙️ **TOPIC:** {topic}")
-                st.write("Record your answer (min 30 seconds).")
+                st.warning("⚠️ Kural: En az 15 saniye konuşmalısınız.")
                 
                 audio = mic_recorder(start_prompt="🎤 Start Recording", stop_prompt="⏹️ Finish Exam")
                 
                 if audio:
-                    with st.spinner("Grading Exam..."):
+                    # SÜRE KONTROLÜ (Whisper Verbose)
+                    with st.spinner("Ses analiz ediliyor..."):
                         bio = io.BytesIO(audio['bytes'])
                         bio.name = "exam.webm"
-                        txt = client.audio.transcriptions.create(model="whisper-1", file=bio).text
-                        st.session_state.exam_answers["speaking_text"] = txt
                         
-                        prompt = f"""
-                        Grade this exam. Current Level: {user_data['current_level']}.
-                        EXAM DATA: {json.dumps(data)}
-                        USER ANSWERS: {json.dumps(st.session_state.exam_answers)}
-                        
-                        DECISION RULE: If Total Score > 70, suggest moving to next level.
-                        
-                        OUTPUT JSON:
-                        {{
-                            "vocab_score": 0, 
-                            "grammar_score": 0, 
-                            "speaking_score": 0,
-                            "total_score": 0, 
-                            "feedback": "Turkish feedback",
-                            "new_level": "B1" (or "A2" if failed)
-                        }}
-                        """
-                        res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user", "content":prompt}])
-                        result = strict_json_parse(res.choices[0].message.content)
-                        
-                        # LEVEL UPDATE LOGIC
-                        if result and result.get("new_level") and result["new_level"] != user_data["current_level"]:
-                            user_data["current_level"] = result["new_level"]
-                            save_data(user_data)
-                            st.toast(f"🎉 LEVEL UP! New Level: {result['new_level']}")
-                        
-                        st.session_state.exam_result = result
-                        st.session_state.exam_step = 4
-                        st.rerun()
+                        try:
+                            # Sadece süreyi öğrenmek için hızlı bir call
+                            transcription = client.audio.transcriptions.create(
+                                model="whisper-1", 
+                                file=bio, 
+                                language="en",
+                                response_format="verbose_json"
+                            )
+                            duration = transcription.duration
+                            
+                            if duration < 15:
+                                st.error(f"❌ Kayıt çok kısa ({duration:.1f} sn). Lütfen daha uzun konuşun.")
+                            else:
+                                st.session_state.exam_answers["speaking_text"] = transcription.text
+                                
+                                # PUANLAMA MANTIĞI
+                                prompt = f"""
+                                Grade this exam for level {user_data['current_level']}.
+                                
+                                SCORING WEIGHTS:
+                                - Vocabulary Section (15 Qs): Max 30 points (approx 2 pts each)
+                                - Grammar Section (15 Qs): Max 30 points (approx 2 pts each)
+                                - Speaking Section: Max 40 points
+                                TOTAL: 100 Points.
+                                
+                                EXAM DATA: {json.dumps(data)}
+                                USER ANSWERS: {json.dumps(st.session_state.exam_answers)}
+                                
+                                DECISION RULE: If Total Score >= 70, suggest moving to next level (e.g. A2 -> B1).
+                                
+                                OUTPUT JSON:
+                                {{
+                                    "vocab_score": 0, 
+                                    "grammar_score": 0, 
+                                    "speaking_score": 0,
+                                    "total_score": 0, 
+                                    "feedback": "Turkish feedback summary",
+                                    "new_level": "B1" 
+                                }}
+                                """
+                                res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user", "content":prompt}])
+                                result = strict_json_parse(res.choices[0].message.content)
+                                
+                                # LEVEL UPDATE
+                                if result and result.get("new_level") and result["new_level"] != user_data["current_level"]:
+                                    if result.get("total_score", 0) >= 70:
+                                        user_data["current_level"] = result["new_level"]
+                                        save_data(user_data)
+                                        st.balloons()
+                                        st.toast(f"🎉 LEVEL UP! New Level: {result['new_level']}")
+                                
+                                st.session_state.exam_result = result
+                                st.session_state.exam_step = 4
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"Hata oluştu: {e}")
 
             # --- RESULT ---
             elif st.session_state.exam_step == 4:
                 res = st.session_state.exam_result or {}
-                st.balloons()
-                st.title(f"📊 Result: {res.get('total_score', 0)}/100")
+                if "total_score" not in res: res["total_score"] = 0 # Fallback
+                
+                st.title(f"📊 Result: {res.get('total_score')}/100")
                 
                 c1, c2, c3 = st.columns(3)
-                c1.metric("Vocab", res.get('vocab_score', 0))
-                c2.metric("Grammar", res.get('grammar_score', 0))
-                c3.metric("Speaking", res.get('speaking_score', 0))
+                c1.metric("Vocab (Max 30)", res.get('vocab_score', 0))
+                c2.metric("Grammar (Max 30)", res.get('grammar_score', 0))
+                c3.metric("Speaking (Max 40)", res.get('speaking_score', 0))
                 
-                st.success(f"**Level Status:** {res.get('new_level', user_data['current_level'])}")
+                st.success(f"**Current Level:** {user_data['current_level']}")
                 st.info(res.get('feedback', ''))
                 
                 if st.button("Exit Exam"):
@@ -510,7 +535,7 @@ if api_key:
                     st.session_state.exam_data = None
                     st.rerun()
 
-    # --- NORMAL MENÜLER (Sınav aktif değilse görünür) ---
+    # --- NORMAL MENÜLER ---
     else:
         page = st.sidebar.radio("📌 Menu", ["🎭 Scenario Coach", "👂 Listening Quiz", "🧠 Vocab Gym (Anki)", "📜 History & Stats"])
 
