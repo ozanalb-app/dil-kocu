@@ -13,7 +13,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v30.4 - Stable Edition", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v30.5 - Master Edition", page_icon="🧠", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- KELİME HAVUZU (HARDCODED) ---
@@ -126,24 +126,18 @@ def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-# --- GÜNCELLENMİŞ VE GÜÇLENDİRİLMİŞ JSON PARSER ---
 def strict_json_parse(text):
     text = text.strip()
-    # Markdown temizliği (```json ... ```)
     if text.startswith("```"):
         text = re.sub(r"^```(json)?|```$", "", text, flags=re.MULTILINE).strip()
-    
     try:
-        # Doğrudan parse etmeyi dene
         return json.loads(text)
     except json.JSONDecodeError:
-        # Parse edilemediyse, ilk { ve son } arasını bulup parse etmeyi dene
         try:
             start = text.find("{")
             end = text.rfind("}") + 1
             if start != -1 and end != -1:
-                json_str = text[start:end]
-                return json.loads(json_str)
+                return json.loads(text[start:end])
         except:
             return {}
     except:
@@ -184,20 +178,16 @@ def generate_dynamic_vocab(client, scenario, level, user_data):
 # --- SRS MANTIĞI: SM-2 ALGORİTMASI ---
 def calculate_sm2(quality, prev_interval, prev_ease_factor):
     new_ease_factor = prev_ease_factor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
-    if new_ease_factor < 1.3:
-        new_ease_factor = 1.3
+    if new_ease_factor < 1.3: new_ease_factor = 1.3
 
     if quality < 3: 
         new_interval = 0 
     else:
-        if prev_interval == 0:
-            new_interval = 1
-        elif prev_interval == 1:
-            new_interval = 6 if quality > 3 else 3
+        if prev_interval == 0: new_interval = 1
+        elif prev_interval == 1: new_interval = 6 if quality > 3 else 3
         else:
             new_interval = math.ceil(prev_interval * new_ease_factor)
-            if quality == 3:
-                new_interval = max(prev_interval + 1, math.floor(new_interval * 0.8))
+            if quality == 3: new_interval = max(prev_interval + 1, math.floor(new_interval * 0.8))
 
     return new_interval, new_ease_factor
 
@@ -226,7 +216,6 @@ def get_next_srs_card(data, session_seen):
 def update_srs_card_sm2(data, word_obj, quality):
     srs_list = data.get("vocab_srs", [])
     existing_idx = next((i for i, item in enumerate(srs_list) if item["word"] == word_obj["word"]), -1)
-    
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     
     if existing_idx == -1:
@@ -242,7 +231,6 @@ def update_srs_card_sm2(data, word_obj, quality):
 
     prev_int = card.get("interval", 0)
     prev_ef = card.get("ease_factor", 2.5)
-    
     new_int, new_ef = calculate_sm2(quality, prev_int, prev_ef)
     
     card["interval"] = new_int
@@ -251,18 +239,14 @@ def update_srs_card_sm2(data, word_obj, quality):
     card["last_review"] = now_str
     
     next_ts = time.time() + (new_int * 24 * 60 * 60)
-    if quality == 0:
-        next_ts = time.time() + (10 * 60) 
+    if quality == 0: next_ts = time.time() + (10 * 60) 
         
     card["next_review_ts"] = next_ts
-
     if "history" not in card: card["history"] = []
     card["history"].append({"date": now_str, "quality": quality, "next_int": new_int})
 
-    if existing_idx == -1:
-        srs_list.append(card)
-    else:
-        srs_list[existing_idx] = card
+    if existing_idx == -1: srs_list.append(card)
+    else: srs_list[existing_idx] = card
         
     data["vocab_srs"] = srs_list
     save_data(data)
@@ -274,7 +258,21 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
     sub_level = determine_sub_level(level, user_data["lessons_completed"])
     full_level_desc = f"{level} ({sub_level})"
     
-    scenario = forced_scenario if forced_scenario else random.choice(SCENARIO_POOL)
+    # --- UPDATE: AKILLI SENARYO SEÇİMİ ---
+    if forced_scenario:
+        scenario = forced_scenario
+    else:
+        # Geçmişte yapılanları bul
+        completed_scenarios = [h.get("topic") for h in user_data.get("lesson_history", [])]
+        available_scenarios = [s for s in SCENARIO_POOL if s not in completed_scenarios]
+        
+        # Eğer hepsi bitmişse havuzu sıfırla
+        if not available_scenarios:
+            available_scenarios = SCENARIO_POOL
+            
+        scenario = random.choice(available_scenarios)
+    # -------------------------------------
+
     target_vocab = generate_dynamic_vocab(client, scenario, level, user_data)
     
     for w in target_vocab:
@@ -529,7 +527,6 @@ if api_key:
         for h in reversed(hist_data):
             with st.expander(f"📚 {h.get('date')} - {h.get('topic')}"):
                 st.write(f"**Score:** {h.get('score')}")
-                # Kırılgan yapıyı korumak için .get ile default değerler
                 br = h.get("breakdown", {})
                 st.caption(f"Grammar: {br.get('grammar','-')} | Vocab: {br.get('vocabulary','-')} | Fluency: {br.get('fluency','-')}")
                 st.success(f"**Artılar:** {', '.join(h.get('feedback_pros', []))}")
@@ -558,11 +555,17 @@ if api_key:
                 st.progress(prog, text=f"Time: {int(curr)}s / {int(targ)}s")
 
         if not st.session_state.get("lesson_active", False):
+            # --- UPDATE: UI NEXT MISSION LOGIC ---
             if "temp_scenario" not in st.session_state or st.session_state.temp_scenario is None:
                 if user_data.get("next_lesson_prep"):
                      st.session_state.temp_scenario = user_data["next_lesson_prep"].get("scenario")
                 else:
-                     st.session_state.temp_scenario = random.choice(SCENARIO_POOL)
+                     completed_scenarios = [h.get("topic") for h in user_data.get("lesson_history", [])]
+                     available_scenarios = [s for s in SCENARIO_POOL if s not in completed_scenarios]
+                     
+                     if not available_scenarios: available_scenarios = SCENARIO_POOL
+                     st.session_state.temp_scenario = random.choice(available_scenarios)
+            # -------------------------------------
             
             st.markdown(f"""
             <div style="padding:15px; background-color:#f0f2f6; border-radius:10px; margin-bottom:20px;">
@@ -654,28 +657,26 @@ if api_key:
                                 try:
                                     bio = io.BytesIO(audio['bytes'])
                                     bio.name = "audio.webm"
-                                    # --- SÜRE TESPİTİ DÜZELTMESİ (WHISPER API) ---
+                                    
+                                    # --- WHISPER DURATION FIX ---
                                     transcription = client.audio.transcriptions.create(
                                         model="whisper-1", 
                                         file=bio, 
                                         language="en", 
                                         temperature=0.2,
-                                        response_format="verbose_json", # JSON ile süre bilgisi alıyoruz
+                                        response_format="verbose_json", 
                                         prompt=f"User speaking about scenario {st.session_state.scenario}."
                                     )
-                                    
                                     txt = transcription.text
-                                    duration = transcription.duration # Gerçek saniye
-                                    
+                                    st.session_state.accumulated_speaking_time += transcription.duration
+                                    # ----------------------------
+
                                     txt_l = (txt or "").lower()
                                     bad = any(p.search(txt_l) for p in _BANNED_PATTERNS)
 
                                     if bad or len(txt.strip()) < 2:
                                         st.warning("Audio unclear.")
                                     else:
-                                        # Artık gerçek süreyi ekliyoruz
-                                        st.session_state.accumulated_speaking_time += duration
-                                        
                                         # --- GRAMMAR CHECK FIX (CONTEXT AWARE) ---
                                         last_question = "Unknown context"
                                         for m in reversed(st.session_state.messages):
@@ -795,7 +796,7 @@ if api_key:
                                         "question": "...",
                                         "user_answer": "...",
                                         "correct_answer": "...",
-                                        "is_correct": true
+                                        "is_correct": true/false
                                     }}
                                 ],
                                 "detailed_feedback": {{
@@ -806,6 +807,7 @@ if api_key:
                                 }},
                                 "next_lesson_homework": {{"scenario": "...", "vocab": ["..."]}}
                             }}
+                            IMPORTANT: Provide 'pros' and 'cons' comments in TURKISH.
                             """
                             
                             msgs = st.session_state.messages + [{"role":"system","content":prompt}]
@@ -814,7 +816,6 @@ if api_key:
                                 res = client.chat.completions.create(model="gpt-4o", messages=msgs)
                                 rep = strict_json_parse(res.choices[0].message.content)
                                 if not rep or "scores" not in rep:
-                                     # Fallback eğer JSON bozuksa
                                      rep = {
                                          "scores": {"total_score": 0, "grammar": 0, "vocabulary": 0, "fluency": 0, "task_achievement": 0, "reading": 0},
                                          "detailed_feedback": {"general_pros": ["Hata oluştu"], "general_cons": ["Lütfen tekrar deneyin"]},
@@ -896,6 +897,9 @@ if api_key:
                             st.write(f"Siz: {fb['user_answer']}")
                             st.markdown(f":{color}[Doğru Cevap: {fb['correct_answer']}]")
                             st.divider()
+                    
+                    with st.expander("🔧 Debug: Raw Analysis Data"):
+                        st.json(rep)
 
                     if st.button("🚀 START NEXT LESSON (Hard Reset)", type="primary", use_container_width=True):
                         st.session_state.lesson_active = False
