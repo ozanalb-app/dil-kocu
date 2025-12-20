@@ -13,7 +13,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v30 - Anki Edition", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v30.1 - Anki Edition", page_icon="🧠", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- KELİME HAVUZU (HARDCODED) ---
@@ -107,7 +107,6 @@ def load_data():
         try:
             data = json.load(f)
         except json.JSONDecodeError:
-            # Dosya bozuksa backup alıp sıfırla
             if os.path.exists(DATA_FILE): os.rename(DATA_FILE, DATA_FILE + ".bak")
             return load_data()
 
@@ -171,17 +170,14 @@ def generate_dynamic_vocab(client, scenario, level, user_data):
 # --- SRS MANTIĞI: SM-2 ALGORİTMASI ---
 def calculate_sm2(quality, prev_interval, prev_ease_factor):
     """
-    Anki SM-2 Algoritması Uyarlaması
-    Quality: 0 (Again), 3 (Hard), 4 (Good), 5 (Easy)
+    Anki SM-2 Algoritması
     """
-    # Ease Factor Hesaplama
     new_ease_factor = prev_ease_factor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
     if new_ease_factor < 1.3:
         new_ease_factor = 1.3
 
-    # Interval (Gün) Hesaplama
-    if quality < 3: # Again
-        new_interval = 0 # Hemen tekrar (Aynı oturumda)
+    if quality < 3: 
+        new_interval = 0 
     else:
         if prev_interval == 0:
             new_interval = 1
@@ -189,7 +185,7 @@ def calculate_sm2(quality, prev_interval, prev_ease_factor):
             new_interval = 6 if quality > 3 else 3
         else:
             new_interval = math.ceil(prev_interval * new_ease_factor)
-            if quality == 3: # Hard ise intervali biraz kıs veya az artır
+            if quality == 3:
                 new_interval = max(prev_interval + 1, math.floor(new_interval * 0.8))
 
     return new_interval, new_ease_factor
@@ -198,17 +194,14 @@ def get_next_srs_card(data, session_seen):
     now = time.time()
     srs_list = data.get("vocab_srs", [])
     
-    # 1. DUE CARDS
     due_cards = [
         card for card in srs_list 
         if card.get("next_review_ts", 0) <= now and card["word"] not in session_seen
     ]
     if due_cards:
-        # En çok gecikeni ver
         due_cards.sort(key=lambda x: x.get("next_review_ts", 0))
         return due_cards[0], "review"
     
-    # 2. NEW CARDS
     srs_words = {c["word"] for c in srs_list}
     new_candidates = [
         w for w in STATIC_VOCAB_POOL 
@@ -217,7 +210,6 @@ def get_next_srs_card(data, session_seen):
     if new_candidates:
         return {"word": random.choice(new_candidates)}, "new"
     
-    # 3. FALLBACK
     return None, None
 
 def update_srs_card_sm2(data, word_obj, quality):
@@ -227,19 +219,16 @@ def update_srs_card_sm2(data, word_obj, quality):
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     
     if existing_idx == -1:
-        # Yeni kart
         card = word_obj.copy()
         card["times_seen"] = 0
         card["interval"] = 0
-        card["ease_factor"] = 2.5 # Anki default
+        card["ease_factor"] = 2.5 
         card["history"] = []
     else:
         card = srs_list[existing_idx]
-        # Eski veriden migration (varsa eksikleri tamamla)
         if "ease_factor" not in card: card["ease_factor"] = 2.5
         if "interval" not in card: card["interval"] = 0
 
-    # SM-2 Hesapla
     prev_int = card.get("interval", 0)
     prev_ef = card.get("ease_factor", 2.5)
     
@@ -251,7 +240,6 @@ def update_srs_card_sm2(data, word_obj, quality):
     card["last_review"] = now_str
     
     next_ts = time.time() + (new_int * 24 * 60 * 60)
-    # Eğer quality 0 (Again) ise, 10 dakika sonraya at (session içinde kalsın)
     if quality == 0:
         next_ts = time.time() + (10 * 60) 
         
@@ -396,7 +384,7 @@ if api_key:
 
     # --- VOCAB GYM (SRS ANKI STYLE) ---
     elif page == "🧠 Vocab Gym (Anki)":
-        st.title("🧠 Vocabulary Gym (Anki SM-2 Algorithm)")
+        st.title("🧠 Vocabulary Gym (Anki SM-2)")
         
         if "srs_active_card" not in st.session_state:
             st.session_state.srs_active_card = None
@@ -435,10 +423,7 @@ if api_key:
                     st.toast("↺ Tekrar Zamanı!")
                 
                 if st.session_state.srs_active_card:
-                    # Session içinde tekrar etmesin (eğer "Again" değilse)
-                    # "Again" butonuna basınca session'dan silmek gerekir ama basitlik için tutalım.
                     st.session_state.gym_session_seen.add(st.session_state.srs_active_card["word"])
-                    
                     word = st.session_state.srs_active_card.get("word", "")
                     tts = gTTS(text=word, lang='en')
                     fp = io.BytesIO()
@@ -455,8 +440,9 @@ if api_key:
                 </div>
                 """, unsafe_allow_html=True)
             
+            # --- UPDATE 1: AUTO-PLAY AUDIO ---
             if st.session_state.srs_audio:
-                st.audio(st.session_state.srs_audio, format='audio/mp3', autoplay=False)
+                st.audio(st.session_state.srs_audio, format='audio/mp3', autoplay=True)
 
             if not st.session_state.srs_revealed:
                 if st.button("👀 Show Answer", use_container_width=True):
@@ -474,7 +460,6 @@ if api_key:
                 st.markdown("### 🎛️ Rate Difficulty:")
                 c1, c2, c3, c4 = st.columns(4)
                 
-                # Butonlar
                 with c1:
                     if st.button("🟥 Again (0)", use_container_width=True):
                         update_srs_card_sm2(user_data, card, quality=0)
@@ -503,27 +488,18 @@ if api_key:
     # --- HISTORY & STATS ---
     elif page == "📜 History & Stats":
         st.title("📜 Progress Log")
-        
-        # --- DEVELOPMENT LOG TABLE ---
         st.subheader("📅 Daily Vocabulary Growth")
-        
-        # Veriyi hazırla: Hangi tarihte kaç KELİME öğrenildi?
-        # Kaynak: vocab_srs içindeki history verileri + lesson_history
-        # Basitlik için lesson_history'deki kelime sayısını gün bazında toplayalım.
         
         hist_data = user_data.get("lesson_history", [])
         vocab_log = {}
-        
         for h in hist_data:
             date_str = h.get("date", "Unknown")
-            # O derste kaç kelime vardı?
-            word_count = len(h.get("words", [])) # Hedef kelimeler
+            word_count = len(h.get("words", []))
             if date_str in vocab_log:
                 vocab_log[date_str] += word_count
             else:
                 vocab_log[date_str] = word_count
         
-        # Tabloya çevir
         if vocab_log:
             df_log = pd.DataFrame(list(vocab_log.items()), columns=["Date", "New Words Studied"])
             df_log = df_log.sort_values("Date", ascending=False)
@@ -546,19 +522,23 @@ if api_key:
         st.title("🗣️ AI Roleplay Coach")
 
         if st.session_state.get("lesson_active", False) and not st.session_state.get("reading_phase", False):
-            with st.sidebar:
-                curr = st.session_state.accumulated_speaking_time
-                targ = st.session_state.target_speaking_seconds
-                prog = min(curr / targ, 1.0) if targ > 0 else 0
-                st.progress(prog, text=f"Time: {int(curr)}s / {int(targ)}s")
-                st.write("---")
-                # --- FINISH BUTTON ---
-                if st.button("🚪 Finish Lesson Early", type="secondary"):
+            # --- UPDATE 2: FINISH BUTTON ON TOP ---
+            c_top1, c_top2 = st.columns([4, 1])
+            with c_top1:
+                st.info(f"🎙️ Speaking Phase | Target: {int(st.session_state.target_speaking_seconds // 60)} mins")
+            with c_top2:
+                if st.button("🚪 Quit / Reset", type="primary", use_container_width=True):
                     st.session_state.lesson_active = False
                     st.session_state.messages = []
                     st.session_state.reading_phase = False
                     st.session_state.scenario = None
                     st.rerun()
+
+            with st.sidebar:
+                curr = st.session_state.accumulated_speaking_time
+                targ = st.session_state.target_speaking_seconds
+                prog = min(curr / targ, 1.0) if targ > 0 else 0
+                st.progress(prog, text=f"Time: {int(curr)}s / {int(targ)}s")
 
         if not st.session_state.get("lesson_active", False):
             if "temp_scenario" not in st.session_state or st.session_state.temp_scenario is None:
@@ -710,9 +690,10 @@ if api_key:
                                     st.error(f"Audio Error: {e}")
 
             else:
-                # READING PHASE BUTTONS
                 st.markdown("### 📖 Reading")
-                if st.button("🚪 Finish Lesson Early", type="secondary"):
+                
+                # --- READING PHASE'de DE BİTİRME BUTONU ---
+                if st.button("🚪 Quit / Reset", type="primary"):
                      st.session_state.lesson_active = False
                      st.session_state.reading_phase = False
                      st.session_state.reading_completed = False
