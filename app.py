@@ -13,7 +13,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v30.3 - Final Turkish Edition", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v30.4 - Stable Edition", page_icon="🧠", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- KELİME HAVUZU (HARDCODED) ---
@@ -126,12 +126,26 @@ def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
+# --- GÜNCELLENMİŞ VE GÜÇLENDİRİLMİŞ JSON PARSER ---
 def strict_json_parse(text):
+    text = text.strip()
+    # Markdown temizliği (```json ... ```)
+    if text.startswith("```"):
+        text = re.sub(r"^```(json)?|```$", "", text, flags=re.MULTILINE).strip()
+    
     try:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        json_str = text[start:end]
-        return json.loads(json_str)
+        # Doğrudan parse etmeyi dene
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # Parse edilemediyse, ilk { ve son } arasını bulup parse etmeyi dene
+        try:
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start != -1 and end != -1:
+                json_str = text[start:end]
+                return json.loads(json_str)
+        except:
+            return {}
     except:
         return {}
 
@@ -169,9 +183,6 @@ def generate_dynamic_vocab(client, scenario, level, user_data):
 
 # --- SRS MANTIĞI: SM-2 ALGORİTMASI ---
 def calculate_sm2(quality, prev_interval, prev_ease_factor):
-    """
-    Anki SM-2 Algoritması
-    """
     new_ease_factor = prev_ease_factor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
     if new_ease_factor < 1.3:
         new_ease_factor = 1.3
@@ -386,7 +397,6 @@ if api_key:
     elif page == "🧠 Vocab Gym (Anki)":
         st.title("🧠 Vocabulary Gym (Anki SM-2)")
 
-        # ÇIKIŞ BUTONU
         if st.button("🚪 Quit / Reset", type="secondary", key="vocab_exit"):
             st.session_state.srs_active_card = None
             st.session_state.srs_revealed = False
@@ -519,7 +529,9 @@ if api_key:
         for h in reversed(hist_data):
             with st.expander(f"📚 {h.get('date')} - {h.get('topic')}"):
                 st.write(f"**Score:** {h.get('score')}")
-                st.caption(f"Speak: {h.get('speaking_score')} | Read: {h.get('reading_score')}")
+                # Kırılgan yapıyı korumak için .get ile default değerler
+                br = h.get("breakdown", {})
+                st.caption(f"Grammar: {br.get('grammar','-')} | Vocab: {br.get('vocabulary','-')} | Fluency: {br.get('fluency','-')}")
                 st.success(f"**Artılar:** {', '.join(h.get('feedback_pros', []))}")
                 st.error(f"**Eksiler:** {', '.join(h.get('feedback_cons', []))}")
 
@@ -642,18 +654,27 @@ if api_key:
                                 try:
                                     bio = io.BytesIO(audio['bytes'])
                                     bio.name = "audio.webm"
-                                    txt = client.audio.transcriptions.create(
-                                        model="whisper-1", file=bio, language="en", temperature=0.2,
+                                    # --- SÜRE TESPİTİ DÜZELTMESİ (WHISPER API) ---
+                                    transcription = client.audio.transcriptions.create(
+                                        model="whisper-1", 
+                                        file=bio, 
+                                        language="en", 
+                                        temperature=0.2,
+                                        response_format="verbose_json", # JSON ile süre bilgisi alıyoruz
                                         prompt=f"User speaking about scenario {st.session_state.scenario}."
-                                    ).text
-
+                                    )
+                                    
+                                    txt = transcription.text
+                                    duration = transcription.duration # Gerçek saniye
+                                    
                                     txt_l = (txt or "").lower()
                                     bad = any(p.search(txt_l) for p in _BANNED_PATTERNS)
 
                                     if bad or len(txt.strip()) < 2:
                                         st.warning("Audio unclear.")
                                     else:
-                                        st.session_state.accumulated_speaking_time += len(txt.split()) * 0.7
+                                        # Artık gerçek süreyi ekliyoruz
+                                        st.session_state.accumulated_speaking_time += duration
                                         
                                         # --- GRAMMAR CHECK FIX (CONTEXT AWARE) ---
                                         last_question = "Unknown context"
@@ -733,7 +754,6 @@ if api_key:
                             r_qs = st.session_state.reading_content.get("questions", [])
                             target_words = st.session_state.target_vocab
                             
-                            # Kullanıcı cevaplarını hazırla
                             user_answers_with_context = []
                             for i, ans in enumerate(ans_list):
                                 q_text = r_qs[i] if i < len(r_qs) else f"Question {i+1}"
@@ -742,7 +762,6 @@ if api_key:
                                     "user_answer": ans
                                 })
 
-                            # --- GELİŞMİŞ PUANLAMA PROMPT'U ---
                             prompt = f"""
                             ACT AS A STRICT IELTS/CEFR EXAMINER. 
                             Analyze the User's performance based on the CHAT HISTORY and READING TASK.
@@ -794,22 +813,26 @@ if api_key:
                             try:
                                 res = client.chat.completions.create(model="gpt-4o", messages=msgs)
                                 rep = strict_json_parse(res.choices[0].message.content)
-                                if not rep: raise Exception("Boş JSON")
+                                if not rep or "scores" not in rep:
+                                     # Fallback eğer JSON bozuksa
+                                     rep = {
+                                         "scores": {"total_score": 0, "grammar": 0, "vocabulary": 0, "fluency": 0, "task_achievement": 0, "reading": 0},
+                                         "detailed_feedback": {"general_pros": ["Hata oluştu"], "general_cons": ["Lütfen tekrar deneyin"]},
+                                         "reading_feedback": []
+                                     }
 
-                                # İstatistikleri Kaydet
                                 user_data["lessons_completed"] += 1
                                 if "next_lesson_homework" in rep: 
                                     user_data["next_lesson_prep"] = rep["next_lesson_homework"]
                                 
-                                # Tarihçeye detaylı kaydet
                                 hist = {
                                     "date": datetime.now().strftime("%Y-%m-%d"),
                                     "topic": st.session_state.scenario,
                                     "score": rep["scores"]["total_score"],
-                                    "breakdown": rep["scores"], # Detaylı puanlar
+                                    "breakdown": rep["scores"],
                                     "words": st.session_state.target_vocab,
-                                    "feedback_pros": rep["detailed_feedback"]["general_pros"],
-                                    "feedback_cons": rep["detailed_feedback"]["general_cons"]
+                                    "feedback_pros": rep["detailed_feedback"].get("general_pros", []),
+                                    "feedback_cons": rep["detailed_feedback"].get("general_cons", [])
                                 }
                                 user_data["lesson_history"].append(hist)
                                 save_data(user_data)
@@ -818,31 +841,63 @@ if api_key:
                                 st.session_state.reading_completed = True
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Analiz Hatası: {e}")
+                                st.error(f"Analysis Error: {e}")
 
                 else:
                     rep = st.session_state.final_report
                     st.balloons()
-                    st.markdown(f"## 📊 Score: {rep.get('score')} (🗣️{rep.get('speaking_score')} | 📖{rep.get('reading_score')})")
+                    
+                    total = rep["scores"]["total_score"]
+                    st.markdown(f"<h1 style='text-align: center; color: #4F8BF9;'>🏆 Score: {total} / 100</h1>", unsafe_allow_html=True)
 
-                    for fb in rep.get("reading_feedback", []):
-                        color = "green" if fb["is_correct"] else "red"
-                        with st.expander(f"Question: {fb['question']}"):
-                            st.write(f"You: {fb['user_answer']}")
-                            st.markdown(f":{color}[Correct: {fb['correct_answer']}]")
+                    cols = st.columns(5)
+                    cols[0].metric("Grammar", rep["scores"]["grammar"])
+                    cols[1].metric("Vocab", rep["scores"]["vocabulary"])
+                    cols[2].metric("Fluency", rep["scores"]["fluency"])
+                    cols[3].metric("Task", rep["scores"]["task_achievement"])
+                    cols[4].metric("Reading", rep["scores"]["reading"])
+
+                    st.divider()
+
+                    used_words = rep.get("used_target_words", [])
+                    all_targets = st.session_state.target_vocab
+                    st.write("### 🎯 Target Words Check")
+                    
+                    if all_targets:
+                        word_cols = st.columns(len(all_targets))
+                        for i, word in enumerate(all_targets):
+                            if word in used_words:
+                                word_cols[i].success(f"✅ {word}")
+                            else:
+                                word_cols[i].error(f"❌ {word}")
+
+                    st.divider()
 
                     c1, c2 = st.columns(2)
                     with c1:
-                        st.success("\n".join(rep.get('pros') or []))
-                    with c2:
-                        st.error("\n".join(rep.get('cons') or []))
-                    
-                    # --- JSON OUTPUT DISPLAY ---
-                    with st.expander("🔧 Debug: Raw Analysis Data"):
-                        st.json(rep)
-                    # ---------------------------
+                        st.subheader("👍 İyi Yönler")
+                        for item in rep["detailed_feedback"].get("general_pros", []):
+                            st.success(f"• {item}")
+                        
+                        st.info(f"**💡 Vocab Tips:** {rep['detailed_feedback'].get('vocabulary_tips', '')}")
 
-                    if st.button("🚀 START NEXT LESSON (Hard Reset)"):
+                    with c2:
+                        st.subheader("👎 Gelişmeli")
+                        for item in rep["detailed_feedback"].get("general_cons", []):
+                            st.error(f"• {item}")
+
+                        st.warning(f"**🛠️ Grammar:** {rep['detailed_feedback'].get('grammar_review', '')}")
+
+                    st.write("---")
+                    with st.expander("📖 Reading Quiz Details"):
+                        for fb in rep.get("reading_feedback", []):
+                            color = "green" if fb["is_correct"] else "red"
+                            st.markdown(f"**Soru:** {fb['question']}")
+                            st.write(f"Siz: {fb['user_answer']}")
+                            st.markdown(f":{color}[Doğru Cevap: {fb['correct_answer']}]")
+                            st.divider()
+
+                    if st.button("🚀 START NEXT LESSON (Hard Reset)", type="primary", use_container_width=True):
                         st.session_state.lesson_active = False
                         st.session_state.messages = []
                         st.session_state.display_messages = []
@@ -855,4 +910,3 @@ if api_key:
                         st.rerun()
 else:
     st.warning("Enter API Key")
-
