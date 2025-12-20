@@ -11,8 +11,39 @@ import re
 from datetime import datetime, timedelta
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v27 - SRS Edition", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v28 - Pro Edition", page_icon="🧠", layout="wide")
 DATA_FILE = "user_data.json"
+
+# --- KELİME HAVUZU (HARDCODED) ---
+STATIC_VOCAB_POOL = [
+    "ask", "answer", "explain", "describe", "decide", "choose", "invite", "agree", "disagree", "believe", 
+    "hope", "plan", "prepare", "practice", "improve", "change", "continue", "share", "miss", "travel", 
+    "order", "pay", "save", "spend", "return", "borrow", "lend", "arrive", "leave", "follow", "stop", 
+    "wait", "remember", "forget", "cancel", "delay", "confirm", "refuse", "accept", "suggest", "recommend", 
+    "expect", "manage", "control", "avoid", "compare", "depend", "protect", "allow", "require", "solve", 
+    "influence", "reduce", "increase", "develop", "organize", "arrange", "replace", "repair", "contact", 
+    "complain", "request", "respond", "apologize", "promise", "warn", "encourage", "support", "handle", 
+    "check", "review", "apply", "hire", "fire", "retire", "job", "work", "office", "company", "meeting", 
+    "project", "task", "goal", "target", "problem", "solution", "idea", "opinion", "experience", "skill", 
+    "responsibility", "duty", "role", "position", "contract", "agreement", "policy", "rule", "system", 
+    "process", "result", "outcome", "reason", "cause", "effect", "decision", "choice", "option", "condition", 
+    "situation", "opportunity", "risk", "advantage", "disadvantage", "progress", "success", "failure", 
+    "mistake", "effort", "challenge", "chance", "future", "past", "present", "time", "schedule", "deadline", 
+    "appointment", "period", "priority", "balance", "routine", "habit", "pressure", "stress", "price", 
+    "cost", "value", "budget", "bill", "payment", "service", "quality", "reservation", "ticket", "trip", 
+    "journey", "holiday", "transport", "destination", "route", "distance", "relationship", "trust", 
+    "respect", "argument", "discussion", "conflict", "cooperation", "communication", "feedback", "important", 
+    "different", "similar", "possible", "impossible", "common", "simple", "difficult", "clear", "unclear", 
+    "serious", "normal", "special", "effective", "efficient", "successful", "unsuccessful", "early", "late", 
+    "busy", "ready", "safe", "dangerous", "careful", "comfortable", "uncomfortable", "popular", "useful", 
+    "useless", "suitable", "unsuitable", "familiar", "unfamiliar", "available", "unavailable", "necessary", 
+    "unnecessary", "flexible", "responsible", "independent", "confident", "nervous", "satisfied", 
+    "disappointed", "motivated", "bored", "focused", "society", "culture", "tradition", "organization", 
+    "institution", "law", "regulation", "government", "authority", "public", "private", "community", 
+    "population", "economy", "industry", "market", "competition", "technology", "internet", "information", 
+    "data", "online", "digital", "platform", "software", "device", "network", "security", "privacy", 
+    "media", "content", "resource", "access", "update"
+]
 
 # --- HALÜSİNASYON FİLTRESİ ---
 BANNED_PHRASES = [
@@ -64,10 +95,11 @@ def load_data():
         return {
             "current_level": "A2",
             "lessons_completed": 0,
-            "vocab_srs": [], # SRS veritabanı: {word, tr, ex, box, next_review_ts}
+            "vocab_srs": [], 
             "completed_scenarios": [],
             "lesson_history": [],
-            "next_lesson_prep": None
+            "next_lesson_prep": None,
+            "used_words": [] # Yeni: Kullanılmış kelimeleri takip et
         }
     with open(DATA_FILE, "r") as f:
         data = json.load(f)
@@ -75,11 +107,10 @@ def load_data():
             "completed_scenarios": [],
             "vocab_srs": [],
             "next_lesson_prep": None,
-            "lesson_history": []
+            "lesson_history": [],
+            "used_words": []
         }
-        # Error bank kaldırıldığı için temizliyoruz veya ignore ediyoruz
         if "error_bank" in data: del data["error_bank"]
-        
         for k, v in defaults.items():
             if k not in data: data[k] = v
         return data
@@ -103,62 +134,69 @@ def determine_sub_level(level, lessons_completed):
     elif cycle < 7: return "Medium"
     else: return "High"
 
-def generate_dynamic_vocab(client, scenario, level):
+def generate_dynamic_vocab(client, scenario, level, user_data):
+    """
+    Havuzdan (STATIC_VOCAB_POOL) henüz kullanılmamış kelimeleri seçer.
+    GPT-4o bu aday havuzundan senaryoya en uygun 5 tanesini belirler.
+    """
+    used = set(user_data.get("used_words", []))
+    available = [w for w in STATIC_VOCAB_POOL if w not in used]
+    
+    # Eğer havuz tükenmek üzereyse sıfırla veya rastgele seç
+    if len(available) < 10:
+        available = STATIC_VOCAB_POOL
+        user_data["used_words"] = [] # Reset döngüsü
+    
+    # Adayları karıştır ve ilk 50 tanesini GPT'ye sun (token tasarrufu)
+    random.shuffle(available)
+    candidates = available[:60]
+    
     prompt = f"""
-    Generate 5 English vocabulary words suitable for CEFR level {level}.
-    The words MUST be highly relevant to the scenario: "{scenario}".
+    Select exactly 5 English words from this list that are MOST relevant to the scenario: "{scenario}".
+    CANDIDATES: {', '.join(candidates)}
+    
     OUTPUT ONLY A JSON ARRAY of strings. Example: ["word1", "word2", "word3", "word4", "word5"]
     """
     try:
         res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": prompt}])
         words = strict_json_parse(res.choices[0].message.content)
         if isinstance(words, list) and len(words) > 0:
+            # Seçilenleri kullanılanlara ekle
             return words[:5]
         else:
-            return ["hello", "help", "please", "thank you", "question"]
+            return candidates[:5]
     except:
-        return ["hello", "help", "please", "thank you", "question"]
+        return candidates[:5]
 
 # --- SRS MANTIĞI ---
 def get_srs_card(data):
-    """Tekrarı gelmiş bir kartı getirir, yoksa None döner."""
     now = time.time()
     srs_list = data.get("vocab_srs", [])
     due_cards = [card for card in srs_list if card.get("next_review_ts", 0) <= now]
-    
     if due_cards:
-        # En çok gecikmiş olanı veya rastgele birini seç
         return random.choice(due_cards)
     return None
 
 def update_srs_card(data, word_obj, is_correct):
-    """Kartın kutusunu ve bir sonraki zamanını günceller."""
     srs_list = data.get("vocab_srs", [])
-    
-    # Listede bu kelime var mı bul
     existing_idx = next((i for i, item in enumerate(srs_list) if item["word"] == word_obj["word"]), -1)
     
     if existing_idx == -1:
-        # Yeni kelime ekleniyor
         card = word_obj.copy()
         card["box"] = 0
     else:
         card = srs_list[existing_idx]
 
-    # SRS Algoritması (Basitleştirilmiş Leitner)
-    # Box 1: 1 gün, Box 2: 3 gün, Box 3: 7 gün, Box 4: 14 gün, Box 5: 30 gün
     intervals = [1, 3, 7, 14, 30]
-    
     if is_correct:
         card["box"] = min(card.get("box", 0) + 1, 5)
     else:
-        card["box"] = 1 # Unuttuysan başa dön (ama 0 değil, 1. kutuya)
+        card["box"] = 1 
 
-    days_to_add = intervals[card["box"] - 1] if card["box"] > 0 else 0.5 # Yeni/sıfırsa yarım gün
+    days_to_add = intervals[card["box"] - 1] if card["box"] > 0 else 0.5
     next_ts = time.time() + (days_to_add * 24 * 60 * 60)
     card["next_review_ts"] = next_ts
     
-    # Listeyi güncelle
     if existing_idx == -1:
         srs_list.append(card)
     else:
@@ -173,46 +211,37 @@ user_data = load_data()
 def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scenario=None):
     sub_level = determine_sub_level(level, user_data["lessons_completed"])
     full_level_desc = f"{level} ({sub_level})"
-    assigned_scenario = None
+    
+    # Senaryo Belirleme
+    scenario = forced_scenario if forced_scenario else random.choice(SCENARIO_POOL)
 
-    if mode == "LESSON" and user_data.get("next_lesson_prep") and not forced_scenario:
-        plan = user_data["next_lesson_prep"]
-        assigned_scenario = plan.get("scenario", plan.get("topic"))
-        user_data["next_lesson_prep"] = None
-        save_data(user_data)
-        st.toast(f"📅 Loaded Plan: {assigned_scenario}", icon="✅")
+    # Hedef Kelimeler (Havuzdan seçilenler)
+    target_vocab = generate_dynamic_vocab(client, scenario, level, user_data)
+    
+    # Kullanılanları kaydet
+    for w in target_vocab:
+        if w not in user_data["used_words"]:
+            user_data["used_words"].append(w)
+    save_data(user_data)
 
-    if forced_scenario:
-        scenario = forced_scenario
-    elif mode == "EXAM":
-        scenario = random.choice(SCENARIO_POOL)
+    if mode == "EXAM":
         system_role = f"ACT AS: Strict Examiner. LEVEL: {full_level_desc}. SCENARIO: {scenario}. CRITICAL: Ask concise questions. Do not give feedback."
     else:
-        if assigned_scenario:
-            scenario = assigned_scenario
-        else:
-            completed = user_data.get("completed_scenarios", [])
-            available = [s for s in SCENARIO_POOL if s not in completed]
-            if not available:
-                st.toast("🎉 Tüm senaryolar tamamlandı! Liste sıfırlanıyor...", icon="🔄")
-                user_data["completed_scenarios"] = []
-                save_data(user_data)
-                available = SCENARIO_POOL
-            scenario = random.choice(available)
-            if scenario not in user_data["completed_scenarios"]:
-                user_data["completed_scenarios"].append(scenario)
-                save_data(user_data)
-
+        # --- ÖNEMLİ DEĞİŞİKLİK: ICEBREAKER İÇİN SYSTEM PROMPT ---
         system_role = f"""
         ACT AS A ROLEPLAYER for: '{scenario}'. 
         LEVEL: {full_level_desc}.
-        CRITICAL RULES: 
-        1. Keep responses VERY SHORT (Max 25 words).
-        2. NEVER say "Thank you for sharing", "Good job".
-        3. MANDATORY: EVERY SINGLE RESPONSE MUST END WITH A DIRECT QUESTION.
+        
+        **INSTRUCTIONS:**
+        1. FIRST MESSAGE: Ignore the scenario for a second. Start by warmly greeting Pınar and asking: "Merhaba Pınar, bugün neler yaptın?" (in Turkish/English mix or simple English).
+        2. WAIT for her answer about her day.
+        3. AFTER she answers about her day: Acknowledge it briefly, then IMMEDIATELY TRANSITION into the roleplay scenario '{scenario}' as your character.
+        
+        **ROLEPLAY RULES (After transition):**
+        - Keep responses SHORT (Max 25 words).
+        - NEVER say "Good job".
+        - MANDATORY: End every response with a relevant QUESTION about the scenario.
         """
-
-    target_vocab = generate_dynamic_vocab(client, scenario, level)
 
     st.session_state.lesson_active = True
     st.session_state.current_mode = mode
@@ -230,12 +259,15 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
     context_msg = f"{mode_icon}\n**SCENARIO:** {scenario}\n🔑 **WORDS:** {', '.join(target_vocab)}"
     st.session_state.display_messages.append({"role": "info", "content": context_msg})
 
-    intro_prompt = f"{system_role}\nStart the roleplay now with your first line as the character. ASK A QUESTION."
+    # İlk mesajı başlat (Icebreaker ile başlayacak)
+    intro_prompt = f"{system_role}\nStart the conversation now with the greeting."
     st.session_state.messages = [{"role": "system", "content": intro_prompt}]
 
     try:
         res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
         msg = res.choices[0].message.content
+        
+        # İlk mesajın çevirisi
         tr_res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": f"Translate to Turkish: {msg}"}])
         tr_msg = tr_res.choices[0].message.content
 
@@ -273,8 +305,7 @@ if api_key:
             start_lesson_logic(client, user_data["current_level"], "EXAM", 2.0)
             st.rerun()
         st.divider()
-    
-    # Error Bank kaldırıldı, menü güncellendi
+        
     page = st.sidebar.radio("📌 Menu", ["🎭 Scenario Coach", "👂 Listening Quiz", "🧠 Vocab Gym (SRS)", "📜 History"])
 
     # --- LISTENING QUIZ ---
@@ -316,15 +347,12 @@ if api_key:
     elif page == "🧠 Vocab Gym (SRS)":
         st.title("🧠 Vocabulary Gym (Spaced Repetition)")
         
-        # State init
         if "srs_active_card" not in st.session_state:
             st.session_state.srs_active_card = None
             st.session_state.srs_revealed = False
             st.session_state.srs_audio = None
 
-        # Kart Çekme Mekanizması
         if st.session_state.srs_active_card is None:
-            # 1. Önce tekrarı gelmiş kelime var mı bak
             due_card = get_srs_card(user_data)
             
             if due_card:
@@ -332,11 +360,16 @@ if api_key:
                 st.session_state.srs_is_new = False
                 st.toast("Eski bir dost (Tekrar Zamanı)", icon="↺")
             else:
-                # 2. Yoksa yeni kelime üret
                 with st.spinner("Yeni kelime üretiliyor..."):
+                    # Yeni kelimeyi havuzdan seç
+                    used_in_srs = [c["word"] for c in user_data.get("vocab_srs", [])]
+                    candidates = [w for w in STATIC_VOCAB_POOL if w not in used_in_srs]
+                    if not candidates: candidates = STATIC_VOCAB_POOL # Fallback
+                    word_choice = random.choice(candidates)
+
                     prompt = f"""
-                    Generate ONE random English word (Level {user_data['current_level']}). 
-                    Output JSON: {{ "word": "...", "tr": "...", "ex": "..." }}
+                    Define this word: "{word_choice}" (Level {user_data['current_level']}). 
+                    Output JSON: {{ "word": "{word_choice}", "tr": "...", "ex": "..." }}
                     """
                     try:
                         res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":prompt}])
@@ -347,7 +380,6 @@ if api_key:
                     except:
                         st.error("Bağlantı hatası, tekrar dene.")
             
-            # Sesi Hazırla
             if st.session_state.srs_active_card:
                 word = st.session_state.srs_active_card.get("word", "")
                 tts = gTTS(text=word, lang='en')
@@ -355,11 +387,8 @@ if api_key:
                 tts.write_to_fp(fp)
                 st.session_state.srs_audio = fp.getvalue()
 
-        # Kartı Göster
         if st.session_state.srs_active_card:
             card = st.session_state.srs_active_card
-            
-            # Kart Görseli
             st.markdown(
                 f"""
                 <div style="border: 2px solid #4F8BF9; border-radius: 10px; padding: 20px; text-align: center; margin-bottom: 20px;">
@@ -377,26 +406,22 @@ if api_key:
                     st.session_state.srs_revealed = True
                     st.rerun()
             else:
-                # Cevap Gösterildi
                 st.success(f"🇹🇷 {card.get('tr', '')}")
                 st.info(f"🇬🇧 {card.get('ex', '')}")
                 
-                # İstatistik (Varsa)
                 if not st.session_state.srs_is_new:
                     box = card.get('box', 1)
-                    st.caption(f"📦 Şu anki Kutu: {box}/5 (Daha yüksek kutu = daha seyrek tekrar)")
+                    st.caption(f"📦 Şu anki Kutu: {box}/5")
 
                 st.markdown("---")
-                st.markdown("#### Bu kelimeyi hatırladın mı?")
-                
-                col1, col2 = st.columns(2)
-                with col1:
+                c1, c2 = st.columns(2)
+                with c1:
                     if st.button("❌ Unuttum / Bilmiyorum", use_container_width=True):
                         update_srs_card(user_data, card, is_correct=False)
                         st.session_state.srs_active_card = None
                         st.session_state.srs_revealed = False
                         st.rerun()
-                with col2:
+                with c2:
                     if st.button("✅ Hatırladım / Biliyorum", type="primary", use_container_width=True):
                         update_srs_card(user_data, card, is_correct=True)
                         st.session_state.srs_active_card = None
@@ -412,10 +437,8 @@ if api_key:
             with st.expander(f"📚 {h.get('date')} - {h.get('topic')}"):
                 st.write(f"**Score:** {h.get('score')}")
                 st.caption(f"Speak: {h.get('speaking_score')} | Read: {h.get('reading_score')}")
-                p = h.get('feedback_pros') or ["Veri Yok"]
-                c = h.get('feedback_cons') or ["Veri Yok"]
-                st.success(f"**Artılar:** {', '.join(p)}")
-                st.error(f"**Eksiler:** {', '.join(c)}")
+                st.success(f"**Artılar:** {', '.join(h.get('feedback_pros', []))}")
+                st.error(f"**Eksiler:** {', '.join(h.get('feedback_cons', []))}")
 
     # --- SCENARIO COACH ---
     elif page == "🎭 Scenario Coach":
@@ -426,35 +449,36 @@ if api_key:
                 curr = st.session_state.accumulated_speaking_time
                 targ = st.session_state.target_speaking_seconds
                 prog = min(curr / targ, 1.0) if targ > 0 else 0
-                c_min = int(curr // 60)
-                c_sec = int(curr % 60)
-                t_min = int(targ // 60)
-                t_sec = int(targ % 60)
-                st.progress(prog, text=f"Time: {c_min}m {c_sec}s / {t_min}m {t_sec}s")
+                st.progress(prog, text=f"Time: {int(curr)}s / {int(targ)}s")
 
         if not st.session_state.get("lesson_active", False):
-            if st.button("🔀 Change Scenario (Shuffle)"):
-                user_data["next_lesson_prep"] = None
-                new_sc = random.choice(SCENARIO_POOL)
-                st.toast(f"New Scenario: {new_sc}", icon="🎲")
-                st.session_state.temp_scenario = new_sc
-                st.rerun()
-
-            display_sc = st.session_state.get("temp_scenario")
-            if not display_sc:
+            # --- NEXT MISSION DISPLAY LOGIC ---
+            # Butona basılmadan önce senaryoyu belirle veya mevcut olanı göster
+            if "temp_scenario" not in st.session_state or st.session_state.temp_scenario is None:
+                # Surprise yerine direkt seçelim
                 if user_data.get("next_lesson_prep"):
-                    prep = user_data.get("next_lesson_prep", {})
-                    display_sc = prep.get("scenario", prep.get("topic", "Surprise Scenario"))
+                     st.session_state.temp_scenario = user_data["next_lesson_prep"].get("scenario")
                 else:
-                    display_sc = "Surprise Scenario"
+                     st.session_state.temp_scenario = random.choice(SCENARIO_POOL)
+            
+            # Ekran Kartı
+            st.markdown(f"""
+            <div style="padding:15px; background-color:#f0f2f6; border-radius:10px; margin-bottom:20px;">
+                <h3>🎯 Next Mission: {st.session_state.temp_scenario}</h3>
+                <p>Start chatting! First, tell me about your day, then we'll dive into the scenario.</p>
+            </div>
+            """, unsafe_allow_html=True)
 
-            st.success(f"🎯 **Next Mission:** {display_sc}")
+            if st.button("🔀 Change Scenario"):
+                 st.session_state.temp_scenario = random.choice(SCENARIO_POOL)
+                 st.rerun()
 
             mins = st.slider("Duration (Mins)", 0.5, 30.0, 1.0, step=0.5)
+            
             if st.button("🚀 START SCENARIO"):
-                forced = st.session_state.get("temp_scenario")
+                forced = st.session_state.temp_scenario
                 start_lesson_logic(client, user_data["current_level"], "LESSON", mins, forced_scenario=forced)
-                st.session_state.temp_scenario = None
+                st.session_state.temp_scenario = None # Temizle ki bir sonraki sefer yenisi gelsin
                 st.rerun()
         else:
             if not st.session_state.get("reading_phase", False):
@@ -466,8 +490,8 @@ if api_key:
                             st.info(msg["content"])
                         elif msg["role"] == "user":
                             if "correction" in msg:
-                                with st.expander("🛠️ Grammar Check", expanded=True):
-                                    st.markdown(f":red[{msg['correction']}]")
+                                with st.expander("🛠️ Grammar Correction", expanded=True):
+                                    st.markdown(f"**Doğrusu:** :green[{msg['correction']}]")
                             with st.chat_message("user", avatar="👤"):
                                 st.write(msg["content"])
                         elif msg["role"] == "assistant":
@@ -490,46 +514,40 @@ if api_key:
                     st.audio(st.session_state.last_audio_response, format="audio/mp3", autoplay=True)
 
                 st.write("---")
-                if st.button("🆘 Hints"):
-                    with st.spinner("..."):
-                        hist = st.session_state.messages[-4:]
-                        prompt = "Give 3 short English reply options suitable for this scenario."
-                        res = client.chat.completions.create(model="gpt-4o", messages=hist+[{"role":"user","content":prompt}])
-                        st.info(res.choices[0].message.content)
-
                 c1, c2 = st.columns([1,4])
                 with c1: audio = mic_recorder(start_prompt="🎤", stop_prompt="⏹️")
                 with c2:
                     curr = st.session_state.accumulated_speaking_time
                     targ = st.session_state.target_speaking_seconds
-
                     time_up = (curr >= targ)
-                    is_exam = st.session_state.get("current_mode") == "EXAM"
-                    can_proceed = time_up or is_exam
-
-                    btn_text = "➡️ UNLOCK READING" if not can_proceed else "➡️ GO TO READING PHASE"
-
-                    if st.button(btn_text, use_container_width=True, disabled=not can_proceed):
+                    btn_text = "➡️ UNLOCK READING" if not time_up else "➡️ GO TO READING PHASE"
+                    
+                    if st.button(btn_text, use_container_width=True, disabled=not time_up):
                         st.session_state.reading_phase = True
                         with st.spinner("Generating reading task..."):
-                            prompt = f"Create A2/B1 reading text about: {st.session_state.scenario}. Then 3 questions. JSON: {{'text':'...','questions':['Q1','Q2','Q3']}}"
+                            # --- READING PROMPT UPDATE ---
+                            prompt = f"""
+                            Create a short reading text (approx 150 words) specifically about this scenario: {st.session_state.scenario}. 
+                            CRITICAL RULES:
+                            1. The text MUST be consistent (e.g., if user complained about cold food, the text discusses cold food).
+                            2. Generate 3 multiple-choice or open-ended questions based strictly on THIS text.
+                            3. Do not ask questions about facts not present in the text.
+                            
+                            JSON Format: {{'text':'...','questions':['Q1','Q2','Q3']}}
+                            """
                             try:
                                 res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":prompt}])
                                 st.session_state.reading_content = strict_json_parse(res.choices[0].message.content)
-                                if not st.session_state.reading_content:
-                                    st.session_state.reading_content = {"text": "Error.", "questions": ["Q1", "Q2", "Q3"]}
+                                if not st.session_state.reading_content: raise Exception("Empty JSON")
                             except:
                                 st.session_state.reading_content = {"text": "Error loading text.", "questions": ["Q1", "Q2", "Q3"]}
                         st.rerun()
-
-                    if not can_proceed:
-                        st.caption(f"⏳ Speak for {int(targ - curr)} more seconds...")
 
                 if audio:
                     if "last_bytes" not in st.session_state or audio['bytes'] != st.session_state.last_bytes:
                         st.session_state.last_bytes = audio['bytes']
                         if len(audio['bytes']) < 500:
-                            st.warning("Audio unclear. Try again.")
+                            st.warning("Audio unclear.")
                         else:
                             with st.spinner("Processing..."):
                                 try:
@@ -547,15 +565,23 @@ if api_key:
                                         st.warning("Audio unclear.")
                                     else:
                                         st.session_state.accumulated_speaking_time += len(txt.split()) * 0.7
-
+                                        
+                                        # --- GRAMMAR CHECK UPDATE ---
                                         corr = None
                                         try:
-                                            p_check = f"Check '{txt}'. IGNORE small errors. If MAJOR error, return 'Düzeltme: [Correct]'. Else 'OK'."
+                                            p_check = f"""
+                                            Check this sentence: '{txt}'. 
+                                            STRICT RULES:
+                                            1. IGNORE missing articles (a, an, the).
+                                            2. IGNORE capitalization.
+                                            3. FOCUS ON: Verb tenses, wrong word choice, sentence structure.
+                                            4. If MAJOR error found, return 'Correction: [Corrected Sentence]'. 
+                                            5. If OK or only minor errors, return 'OK'.
+                                            """
                                             c_res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":p_check}])
                                             ans = c_res.choices[0].message.content
-                                            if "Düzeltme:" in ans:
-                                                corr = ans
-                                                # Error Bank KAYDI KALDIRILDI
+                                            if "Correction:" in ans:
+                                                corr = ans.replace("Correction:", "").strip()
                                         except: pass
 
                                         u_msg = {"role": "user", "content": txt}
@@ -598,17 +624,11 @@ if api_key:
                             prompt = """
                             Analyze Speaking & Reading.
                             SCORING: score = (speak_score*0.8) + (read_score*0.2).
-                            FEEDBACK (IN TURKISH): pros, cons, grammar_topics, suggestions.
-                            NEXT LESSON: New scenario + 5 words.
-                            JSON MUST BE VALID.
                             JSON: {
                                 "score": 0, "speaking_score": 0, "reading_score": 0,
                                 "reading_feedback": [{"question":"...","user_answer":"...","correct_answer":"...","is_correct":true}],
-                                "learned_words": ["word1", "word2"], 
-                                "pros": ["Pro 1", "Pro 2"], 
-                                "cons": ["Con 1", "Con 2"], 
-                                "grammar_topics": ["Topic 1"], 
-                                "suggestions": ["Tip 1"],
+                                "pros": ["Pro 1"], "cons": ["Con 1"], 
+                                "grammar_topics": ["Topic 1"],
                                 "next_lesson_homework": {"scenario": "...", "vocab": ["..."]}
                             }
                             """
@@ -622,15 +642,13 @@ if api_key:
 
                                 user_data["lessons_completed"] += 1
                                 if "next_lesson_homework" in rep: user_data["next_lesson_prep"] = rep["next_lesson_homework"]
-
+                                
                                 hist = {
                                     "date": datetime.now().strftime("%Y-%m-%d"),
                                     "topic": st.session_state.scenario,
                                     "score": rep.get("score"),
                                     "speaking_score": rep.get("speaking_score"),
                                     "reading_score": rep.get("reading_score"),
-                                    "grammar_topics": rep.get("grammar_topics", []),
-                                    "words": st.session_state.target_vocab,
                                     "feedback_pros": rep.get("pros", []),
                                     "feedback_cons": rep.get("cons", [])
                                 }
@@ -656,17 +674,9 @@ if api_key:
 
                     c1, c2 = st.columns(2)
                     with c1:
-                        p = rep.get('pros') or ["Veri Yok"]
-                        st.success("\n".join(p))
+                        st.success("\n".join(rep.get('pros') or []))
                     with c2:
-                        c = rep.get('cons') or ["Veri Yok"]
-                        st.error("\n".join(c))
-
-                    if rep.get('grammar_topics'):
-                        st.warning("**Çalış:** " + ", ".join(rep.get('grammar_topics')))
-
-                    next_sc = rep.get('next_lesson_homework', {}).get('scenario', 'Next Level')
-                    st.info(f"**Next:** {next_sc}")
+                        st.error("\n".join(rep.get('cons') or []))
 
                     if st.button("🚀 START NEXT LESSON (Hard Reset)"):
                         st.session_state.lesson_active = False
@@ -676,13 +686,8 @@ if api_key:
                         st.session_state.reading_completed = False
                         st.session_state.final_report = None
                         st.session_state.accumulated_speaking_time = 0.0
-                        st.session_state.target_speaking_seconds = 0.0
-                        st.session_state.target_vocab = []
                         st.session_state.scenario = None
-                        st.session_state.last_audio_response = None
-                        st.session_state.last_audio_bytes = None
-                        st.session_state.last_bytes = None
-                        st.session_state.reading_content = None
+                        st.session_state.temp_scenario = None
                         st.rerun()
 else:
     st.warning("Enter API Key")
