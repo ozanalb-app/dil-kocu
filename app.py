@@ -620,28 +620,77 @@ if api_key:
                         submitted = st.form_submit_button("🏁 FINISH")
 
                     if submitted:
-                        with st.spinner("Analyzing..."):
-                            prompt = """
-                            Analyze Speaking & Reading.
-                            SCORING: score = (speak_score*0.8) + (read_score*0.2).
-                            JSON: {
-                                "score": 0, "speaking_score": 0, "reading_score": 0,
-                                "reading_feedback": [{"question":"...","user_answer":"...","correct_answer":"...","is_correct":true}],
-                                "pros": ["Pro 1"], "cons": ["Con 1"], 
-                                "grammar_topics": ["Topic 1"],
-                                "next_lesson_homework": {"scenario": "...", "vocab": ["..."]}
-                            }
+                        with st.spinner("Analyzing Performance (Speaking + Reading)..."):
+                            # --- FIX: READING DATASINI HAZIRLA ---
+                            # AI'ya metni ve soruları hatırlatmamız lazım, yoksa sadece cevapları görür.
+                            r_text = st.session_state.reading_content.get("text", "")
+                            r_qs = st.session_state.reading_content.get("questions", [])
+                            
+                            # Kullanıcının cevaplarını soru sırasına göre eşleştir
+                            user_answers_with_context = []
+                            for i, ans in enumerate(ans_list):
+                                q_text = r_qs[i] if i < len(r_qs) else f"Question {i+1}"
+                                user_answers_with_context.append({
+                                    "question": q_text,
+                                    "user_answer": ans
+                                })
+
+                            # --- ANALİZ PROMPT ---
+                            prompt = f"""
+                            ACT AS AN EXAMINER. Analyze the User's performance based on:
+                            1. The CHAT HISTORY provided in the messages (Speaking Skills).
+                            2. The READING TASK details provided below (Reading Skills).
+
+                            --- READING TASK DATA ---
+                            TEXT: "{r_text}"
+                            USER ANSWERS: {json.dumps(user_answers_with_context)}
+                            -------------------------
+
+                            SCORING RULES:
+                            - Speaking Score (0-100): Based on grammar, vocabulary, fluency in Chat History.
+                            - Reading Score (0-100): Check if USER ANSWERS are correct according to the TEXT.
+                            - Final Score = (Speaking * 0.8) + (Reading * 0.2).
+
+                            OUTPUT JSON FORMAT (Strict):
+                            {{
+                                "score": 0, 
+                                "speaking_score": 0, 
+                                "reading_score": 0,
+                                "reading_feedback": [
+                                    {{
+                                        "question": "...",
+                                        "user_answer": "...",
+                                        "correct_answer": "...",
+                                        "is_correct": true/false
+                                    }}
+                                ],
+                                "pros": ["Strong point 1", "Strong point 2"], 
+                                "cons": ["Weak point 1", "Weak point 2"], 
+                                "grammar_topics": ["Topic to study"],
+                                "next_lesson_homework": {{"scenario": "...", "vocab": ["..."]}}
+                            }}
                             """
-                            user_json = json.dumps({f"Q{i}": a for i,a in enumerate(ans_list)})
-                            msgs = st.session_state.messages + [{"role":"user","content":f"Reading Answers: {user_json}"}, {"role":"system","content":prompt}]
+                            
+                            # Mesaj geçmişini alıp sonuna analiz promptunu ekliyoruz
+                            msgs = st.session_state.messages + [{"role":"system","content":prompt}]
 
                             try:
                                 res = client.chat.completions.create(model="gpt-4o", messages=msgs)
                                 rep = strict_json_parse(res.choices[0].message.content)
-                                if not rep: rep = {"score": 70, "pros": ["Veri Yok"], "cons": ["Veri Yok"]}
+                                
+                                # Eğer AI boş dönerse varsayılan değer ata
+                                if not rep: 
+                                    rep = {
+                                        "score": 0, 
+                                        "speaking_score": 0, 
+                                        "reading_score": 0,
+                                        "pros": ["Analiz hatası oluştu."], 
+                                        "cons": ["Lütfen tekrar deneyin."]
+                                    }
 
                                 user_data["lessons_completed"] += 1
-                                if "next_lesson_homework" in rep: user_data["next_lesson_prep"] = rep["next_lesson_homework"]
+                                if "next_lesson_homework" in rep: 
+                                    user_data["next_lesson_prep"] = rep["next_lesson_homework"]
                                 
                                 hist = {
                                     "date": datetime.now().strftime("%Y-%m-%d"),
@@ -691,5 +740,6 @@ if api_key:
                         st.rerun()
 else:
     st.warning("Enter API Key")
+
 
 
