@@ -13,7 +13,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v30.1 - Anki Edition", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v30.2 - Anki Edition", page_icon="🧠", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- KELİME HAVUZU (HARDCODED) ---
@@ -350,20 +350,6 @@ if api_key:
     # --- LISTENING QUIZ ---
     if page == "👂 Listening Quiz":
         st.title("👂 Listening & Dictation")
-        # --- VOCAB GYM (SRS ANKI STYLE) ---
-    elif page == "🧠 Vocab Gym (Anki)":
-        st.title("🧠 Vocabulary Gym (Anki SM-2)")
-        
-        # --- EKLENEN KISIM: ÇIKIŞ BUTONU ---
-        if st.button("🚪 Quit / Reset", type="secondary", key="vocab_exit"):
-            st.session_state.srs_active_card = None
-            st.session_state.srs_revealed = False
-            st.session_state.srs_audio = None
-            st.rerun()
-        # -----------------------------------
-        
-        if "srs_active_card" not in st.session_state:
-            # ... kod devam ediyor ...
         if "quiz_text" not in st.session_state:
             st.session_state.quiz_text = None
             st.session_state.quiz_audio = None
@@ -399,7 +385,15 @@ if api_key:
     # --- VOCAB GYM (SRS ANKI STYLE) ---
     elif page == "🧠 Vocab Gym (Anki)":
         st.title("🧠 Vocabulary Gym (Anki SM-2)")
-        
+
+        # --- EKLENEN KISIM: KELİME ÇALIŞIRKEN ÇIKIŞ BUTONU ---
+        if st.button("🚪 Quit / Reset", type="secondary", key="vocab_exit"):
+            st.session_state.srs_active_card = None
+            st.session_state.srs_revealed = False
+            st.session_state.srs_audio = None
+            st.rerun()
+        # ----------------------------------------------------
+
         if "srs_active_card" not in st.session_state:
             st.session_state.srs_active_card = None
             st.session_state.srs_revealed = False
@@ -454,7 +448,7 @@ if api_key:
                 </div>
                 """, unsafe_allow_html=True)
             
-            # --- UPDATE 1: AUTO-PLAY AUDIO ---
+            # Auto-play audio
             if st.session_state.srs_audio:
                 st.audio(st.session_state.srs_audio, format='audio/mp3', autoplay=True)
 
@@ -536,7 +530,6 @@ if api_key:
         st.title("🗣️ AI Roleplay Coach")
 
         if st.session_state.get("lesson_active", False) and not st.session_state.get("reading_phase", False):
-            # --- UPDATE 2: FINISH BUTTON ON TOP ---
             c_top1, c_top2 = st.columns([4, 1])
             with c_top1:
                 st.info(f"🎙️ Speaking Phase | Target: {int(st.session_state.target_speaking_seconds // 60)} mins")
@@ -834,4 +827,3 @@ if api_key:
                         st.rerun()
 else:
     st.warning("Enter API Key")
-
