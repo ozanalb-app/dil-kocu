@@ -233,7 +233,7 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
         LEVEL: {full_level_desc}.
         
         **INSTRUCTIONS:**
-        1. FIRST MESSAGE: Ignore the scenario for a second. Start by warmly greeting Pınar and asking: "Hello Pınar, how was your day? Could you tell me what you did?" (in Turkish/English mix or simple English).
+        1. FIRST MESSAGE: Ignore the scenario for a second. Start by warmly greeting Pınar and asking: "Hello Pınar, how was your day? Could you tell me what you did?" (in simple English).
         2. WAIT for her answer about her day.
         3. AFTER she answers about her day: Acknowledge it briefly, then IMMEDIATELY TRANSITION into the roleplay scenario '{scenario}' as your character.
         
@@ -691,4 +691,5 @@ if api_key:
                         st.rerun()
 else:
     st.warning("Enter API Key")
+
 
