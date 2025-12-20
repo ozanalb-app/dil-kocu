@@ -8,10 +8,12 @@ import random
 import io
 import time
 import re
+import math
+import pandas as pd
 from datetime import datetime, timedelta
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v29 - Ultimate SRS", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v30 - Anki Edition", page_icon="🧠", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- KELİME HAVUZU (HARDCODED) ---
@@ -57,9 +59,6 @@ _BANNED_PATTERNS = [re.compile(rf"\b{re.escape(p.lower())}\b") for p in BANNED_P
 # --- 2. SENARYO HAVUZU ---
 SCENARIO_POOL = [
     "Parent teacher meeting",
-    "Traffic stop bu police",
-    "Traffic accident, conversation with other driver",
-    "Sending package from post office",
     "Coffee Shop: Ordering a Latte with Oat Milk",
     "Hotel Reception: Checking in and Asking for Wi-Fi",
     "Street: Asking a Stranger for Directions to the Metro",
@@ -105,7 +104,13 @@ def load_data():
             "used_words": []
         }
     with open(DATA_FILE, "r") as f:
-        data = json.load(f)
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            # Dosya bozuksa backup alıp sıfırla
+            if os.path.exists(DATA_FILE): os.rename(DATA_FILE, DATA_FILE + ".bak")
+            return load_data()
+
         defaults = {
             "completed_scenarios": [],
             "vocab_srs": [],
@@ -163,13 +168,33 @@ def generate_dynamic_vocab(client, scenario, level, user_data):
     except:
         return candidates[:5]
 
-# --- SRS MANTIĞI (GELİŞMİŞ) ---
+# --- SRS MANTIĞI: SM-2 ALGORİTMASI ---
+def calculate_sm2(quality, prev_interval, prev_ease_factor):
+    """
+    Anki SM-2 Algoritması Uyarlaması
+    Quality: 0 (Again), 3 (Hard), 4 (Good), 5 (Easy)
+    """
+    # Ease Factor Hesaplama
+    new_ease_factor = prev_ease_factor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
+    if new_ease_factor < 1.3:
+        new_ease_factor = 1.3
+
+    # Interval (Gün) Hesaplama
+    if quality < 3: # Again
+        new_interval = 0 # Hemen tekrar (Aynı oturumda)
+    else:
+        if prev_interval == 0:
+            new_interval = 1
+        elif prev_interval == 1:
+            new_interval = 6 if quality > 3 else 3
+        else:
+            new_interval = math.ceil(prev_interval * new_ease_factor)
+            if quality == 3: # Hard ise intervali biraz kıs veya az artır
+                new_interval = max(prev_interval + 1, math.floor(new_interval * 0.8))
+
+    return new_interval, new_ease_factor
+
 def get_next_srs_card(data, session_seen):
-    """
-    1. Öncelik: Tekrar zamanı gelmiş (Due) kartlar.
-    2. Öncelik: Havuzdan hiç çalışılmamış (New) kartlar.
-    3. Kural: session_seen setindeki (bu oturumda sorulan) kelimeleri atla.
-    """
     now = time.time()
     srs_list = data.get("vocab_srs", [])
     
@@ -178,67 +203,63 @@ def get_next_srs_card(data, session_seen):
         card for card in srs_list 
         if card.get("next_review_ts", 0) <= now and card["word"] not in session_seen
     ]
-    
     if due_cards:
-        return random.choice(due_cards), "review"
+        # En çok gecikeni ver
+        due_cards.sort(key=lambda x: x.get("next_review_ts", 0))
+        return due_cards[0], "review"
     
     # 2. NEW CARDS
-    # SRS listesinde olmayan kelimeleri bul
     srs_words = {c["word"] for c in srs_list}
     new_candidates = [
         w for w in STATIC_VOCAB_POOL 
         if w not in srs_words and w not in session_seen
     ]
-    
     if new_candidates:
         return {"word": random.choice(new_candidates)}, "new"
     
-    # 3. FALLBACK (Hepsini bitirdiysen rastgele sor ama oturumda sorulmamış olsun)
-    available_srs = [c for c in srs_list if c["word"] not in session_seen]
-    if available_srs:
-        return random.choice(available_srs), "review"
-        
+    # 3. FALLBACK
     return None, None
 
-def update_srs_card(data, word_obj, is_correct):
+def update_srs_card_sm2(data, word_obj, quality):
     srs_list = data.get("vocab_srs", [])
     existing_idx = next((i for i, item in enumerate(srs_list) if item["word"] == word_obj["word"]), -1)
     
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     
     if existing_idx == -1:
-        # Yeni kelime oluşturma
+        # Yeni kart
         card = word_obj.copy()
-        card["box"] = 0
         card["times_seen"] = 0
+        card["interval"] = 0
+        card["ease_factor"] = 2.5 # Anki default
         card["history"] = []
     else:
         card = srs_list[existing_idx]
+        # Eski veriden migration (varsa eksikleri tamamla)
+        if "ease_factor" not in card: card["ease_factor"] = 2.5
+        if "interval" not in card: card["interval"] = 0
 
-    # İstatistik Güncelleme
+    # SM-2 Hesapla
+    prev_int = card.get("interval", 0)
+    prev_ef = card.get("ease_factor", 2.5)
+    
+    new_int, new_ef = calculate_sm2(quality, prev_int, prev_ef)
+    
+    card["interval"] = new_int
+    card["ease_factor"] = new_ef
     card["times_seen"] = card.get("times_seen", 0) + 1
     card["last_review"] = now_str
-    if "history" not in card: card["history"] = []
     
-    history_entry = {
-        "date": now_str,
-        "result": "Correct" if is_correct else "Incorrect"
-    }
-    card["history"].append(history_entry)
-
-    # Leitner Algoritması
-    intervals = [1, 3, 7, 14, 30] # Günler
-    
-    if is_correct:
-        card["box"] = min(card.get("box", 0) + 1, 5)
-    else:
-        card["box"] = 1 # Unuttuysan başa sar
-
-    days_to_add = intervals[card["box"] - 1] if card["box"] > 0 else 0.5
-    next_ts = time.time() + (days_to_add * 24 * 60 * 60)
+    next_ts = time.time() + (new_int * 24 * 60 * 60)
+    # Eğer quality 0 (Again) ise, 10 dakika sonraya at (session içinde kalsın)
+    if quality == 0:
+        next_ts = time.time() + (10 * 60) 
+        
     card["next_review_ts"] = next_ts
-    
-    # Listeye Geri Yaz
+
+    if "history" not in card: card["history"] = []
+    card["history"].append({"date": now_str, "quality": quality, "next_int": new_int})
+
     if existing_idx == -1:
         srs_list.append(card)
     else:
@@ -257,7 +278,6 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
     scenario = forced_scenario if forced_scenario else random.choice(SCENARIO_POOL)
     target_vocab = generate_dynamic_vocab(client, scenario, level, user_data)
     
-    # Senaryoda kullanılanları da basitçe used_words'e ekliyoruz ki kelime havuzunda dönsün
     for w in target_vocab:
         if w not in user_data["used_words"]:
             user_data["used_words"].append(w)
@@ -269,12 +289,10 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
         system_role = f"""
         ACT AS A ROLEPLAYER for: '{scenario}'. 
         LEVEL: {full_level_desc}.
-        
         **INSTRUCTIONS:**
         1. FIRST MESSAGE: Ignore the scenario for a second. Start by warmly greeting Pınar and asking: "Hello Pınar, what did you do today?" (in English).
         2. WAIT for her answer about her day.
         3. AFTER she answers about her day: Acknowledge it briefly, then IMMEDIATELY TRANSITION into the roleplay scenario '{scenario}' as your character.
-        
         **ROLEPLAY RULES (After transition):**
         - Keep responses SHORT (Max 25 words).
         - NEVER say "Good job".
@@ -303,13 +321,10 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
     try:
         res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
         msg = res.choices[0].message.content
-        
         tr_res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": f"Translate to Turkish: {msg}"}])
         tr_msg = tr_res.choices[0].message.content
-
         st.session_state.messages.append({"role": "assistant", "content": msg})
         st.session_state.display_messages.append({"role": "assistant", "content": msg, "tr_content": tr_msg})
-
         tts = gTTS(text=msg, lang='en')
         fp = io.BytesIO()
         tts.write_to_fp(fp)
@@ -342,7 +357,7 @@ if api_key:
             st.rerun()
         st.divider()
         
-    page = st.sidebar.radio("📌 Menu", ["🎭 Scenario Coach", "👂 Listening Quiz", "🧠 Vocab Gym (SRS)", "📜 History"])
+    page = st.sidebar.radio("📌 Menu", ["🎭 Scenario Coach", "👂 Listening Quiz", "🧠 Vocab Gym (Anki)", "📜 History & Stats"])
 
     # --- LISTENING QUIZ ---
     if page == "👂 Listening Quiz":
@@ -379,33 +394,26 @@ if api_key:
                 else:
                     st.error(f"❌ Correct: {st.session_state.quiz_text}")
 
-    # --- VOCAB GYM (SRS SYSTEM) ---
-    elif page == "🧠 Vocab Gym (SRS)":
-        st.title("🧠 Vocabulary Gym (Spaced Repetition)")
+    # --- VOCAB GYM (SRS ANKI STYLE) ---
+    elif page == "🧠 Vocab Gym (Anki)":
+        st.title("🧠 Vocabulary Gym (Anki SM-2 Algorithm)")
         
-        # Session State Init
         if "srs_active_card" not in st.session_state:
             st.session_state.srs_active_card = None
             st.session_state.srs_revealed = False
             st.session_state.srs_audio = None
-        
-        # Bu oturumda sorulanları takip etmek için set (Sayfa yenilenince sıfırlanır)
         if "gym_session_seen" not in st.session_state:
             st.session_state.gym_session_seen = set()
 
-        # KART SEÇİMİ
         if st.session_state.srs_active_card is None:
             card_data, card_type = get_next_srs_card(user_data, st.session_state.gym_session_seen)
-            
             if card_data:
-                # Eğer New ise, GPT'den detaylarını çek
                 if card_type == "new":
                     with st.spinner(f"Yeni kelime hazırlanıyor: {card_data['word']}..."):
                         word_choice = card_data['word']
                         prompt = f"""
                         Define the English word: "{word_choice}".
                         TARGET LEVEL: {user_data['current_level']}.
-                        
                         OUTPUT JSON ONLY:
                         {{
                             "word": "{word_choice}",
@@ -422,14 +430,13 @@ if api_key:
                         except:
                             st.error("Bağlantı hatası.")
                 else:
-                    # Review ise zaten datası var
                     st.session_state.srs_active_card = card_data
                     st.session_state.srs_is_new = False
                     st.toast("↺ Tekrar Zamanı!")
                 
-                # Sesi Hazırla
                 if st.session_state.srs_active_card:
-                    # Session setine ekle ki bu oturumda bir daha gelmesin
+                    # Session içinde tekrar etmesin (eğer "Again" değilse)
+                    # "Again" butonuna basınca session'dan silmek gerekir ama basitlik için tutalım.
                     st.session_state.gym_session_seen.add(st.session_state.srs_active_card["word"])
                     
                     word = st.session_state.srs_active_card.get("word", "")
@@ -440,58 +447,94 @@ if api_key:
             else:
                 st.info("🎉 Tebrikler! Şimdilik çalışılacak kelime kalmadı.")
 
-        # KART GÖSTERİMİ
         if st.session_state.srs_active_card:
             card = st.session_state.srs_active_card
-            
-            st.markdown(
-                f"""
+            st.markdown(f"""
                 <div style="border: 2px solid #4F8BF9; border-radius: 10px; padding: 20px; text-align: center; margin-bottom: 20px;">
                     <h1 style='color:#4F8BF9; font-size: 50px; margin:0;'>{card['word']}</h1>
                 </div>
-                """, 
-                unsafe_allow_html=True
-            )
+                """, unsafe_allow_html=True)
             
             if st.session_state.srs_audio:
                 st.audio(st.session_state.srs_audio, format='audio/mp3', autoplay=False)
 
             if not st.session_state.srs_revealed:
-                if st.button("👀 Show Meaning", use_container_width=True):
+                if st.button("👀 Show Answer", use_container_width=True):
                     st.session_state.srs_revealed = True
                     st.rerun()
             else:
-                # CEVAP GÖSTERİMİ
                 st.success(f"🇹🇷 {card.get('tr', 'No Data')}")
                 st.info(f"🇬🇧 {card.get('ex', 'No Data')}")
                 
-                # İSTATİSTİKLER
                 if not st.session_state.srs_is_new:
-                    box = card.get('box', 0)
-                    seen = card.get('times_seen', 0)
-                    st.caption(f"📦 Kutu: {box}/5 | 👀 Görülme: {seen} kez")
+                    ef = card.get('ease_factor', 2.5)
+                    inter = card.get('interval', 0)
+                    st.caption(f"📊 Stats: Ease: {ef:.2f} | Interval: {inter} days")
+
+                st.markdown("### 🎛️ Rate Difficulty:")
+                c1, c2, c3, c4 = st.columns(4)
                 
-                st.markdown("---")
-                c1, c2 = st.columns(2)
+                # Butonlar
                 with c1:
-                    if st.button("❌ Unuttum / Bilmiyorum", use_container_width=True):
-                        update_srs_card(user_data, card, is_correct=False)
+                    if st.button("🟥 Again (0)", use_container_width=True):
+                        update_srs_card_sm2(user_data, card, quality=0)
                         st.session_state.srs_active_card = None
                         st.session_state.srs_revealed = False
                         st.rerun()
                 with c2:
-                    if st.button("✅ Hatırladım / Biliyorum", type="primary", use_container_width=True):
-                        update_srs_card(user_data, card, is_correct=True)
+                    if st.button("🟧 Hard (3)", use_container_width=True):
+                        update_srs_card_sm2(user_data, card, quality=3)
+                        st.session_state.srs_active_card = None
+                        st.session_state.srs_revealed = False
+                        st.rerun()
+                with c3:
+                    if st.button("🟩 Good (4)", use_container_width=True):
+                        update_srs_card_sm2(user_data, card, quality=4)
+                        st.session_state.srs_active_card = None
+                        st.session_state.srs_revealed = False
+                        st.rerun()
+                with c4:
+                    if st.button("🟦 Easy (5)", use_container_width=True):
+                        update_srs_card_sm2(user_data, card, quality=5)
                         st.session_state.srs_active_card = None
                         st.session_state.srs_revealed = False
                         st.rerun()
 
-    # --- HISTORY ---
-    elif page == "📜 History":
-        st.title("📜 History")
-        hist = user_data.get("lesson_history", [])
-        if not hist: st.info("No history.")
-        for h in reversed(hist):
+    # --- HISTORY & STATS ---
+    elif page == "📜 History & Stats":
+        st.title("📜 Progress Log")
+        
+        # --- DEVELOPMENT LOG TABLE ---
+        st.subheader("📅 Daily Vocabulary Growth")
+        
+        # Veriyi hazırla: Hangi tarihte kaç KELİME öğrenildi?
+        # Kaynak: vocab_srs içindeki history verileri + lesson_history
+        # Basitlik için lesson_history'deki kelime sayısını gün bazında toplayalım.
+        
+        hist_data = user_data.get("lesson_history", [])
+        vocab_log = {}
+        
+        for h in hist_data:
+            date_str = h.get("date", "Unknown")
+            # O derste kaç kelime vardı?
+            word_count = len(h.get("words", [])) # Hedef kelimeler
+            if date_str in vocab_log:
+                vocab_log[date_str] += word_count
+            else:
+                vocab_log[date_str] = word_count
+        
+        # Tabloya çevir
+        if vocab_log:
+            df_log = pd.DataFrame(list(vocab_log.items()), columns=["Date", "New Words Studied"])
+            df_log = df_log.sort_values("Date", ascending=False)
+            st.dataframe(df_log, use_container_width=True)
+        else:
+            st.info("Henüz veri yok.")
+
+        st.divider()
+        st.subheader("📚 Lesson History")
+        if not hist_data: st.info("No history.")
+        for h in reversed(hist_data):
             with st.expander(f"📚 {h.get('date')} - {h.get('topic')}"):
                 st.write(f"**Score:** {h.get('score')}")
                 st.caption(f"Speak: {h.get('speaking_score')} | Read: {h.get('reading_score')}")
@@ -508,6 +551,14 @@ if api_key:
                 targ = st.session_state.target_speaking_seconds
                 prog = min(curr / targ, 1.0) if targ > 0 else 0
                 st.progress(prog, text=f"Time: {int(curr)}s / {int(targ)}s")
+                st.write("---")
+                # --- FINISH BUTTON ---
+                if st.button("🚪 Finish Lesson Early", type="secondary"):
+                    st.session_state.lesson_active = False
+                    st.session_state.messages = []
+                    st.session_state.reading_phase = False
+                    st.session_state.scenario = None
+                    st.rerun()
 
         if not st.session_state.get("lesson_active", False):
             if "temp_scenario" not in st.session_state or st.session_state.temp_scenario is None:
@@ -659,8 +710,16 @@ if api_key:
                                     st.error(f"Audio Error: {e}")
 
             else:
+                # READING PHASE BUTTONS
+                st.markdown("### 📖 Reading")
+                if st.button("🚪 Finish Lesson Early", type="secondary"):
+                     st.session_state.lesson_active = False
+                     st.session_state.reading_phase = False
+                     st.session_state.reading_completed = False
+                     st.session_state.messages = []
+                     st.rerun()
+                     
                 if not st.session_state.get("reading_completed", False):
-                    st.markdown("### 📖 Reading")
                     content = st.session_state.get("reading_content", {})
                     st.info(content.get("text", ""))
 
@@ -669,7 +728,7 @@ if api_key:
                         questions = content.get("questions", ["Q1", "Q2", "Q3"])
                         for i, q in enumerate(questions):
                             ans_list.append(st.text_input(f"{i+1}. {q}"))
-                        submitted = st.form_submit_button("🏁 FINISH")
+                        submitted = st.form_submit_button("🏁 FINISH & GRADE")
 
                     if submitted:
                         with st.spinner("Analyzing Performance (Speaking + Reading)..."):
@@ -725,13 +784,7 @@ if api_key:
                                 res = client.chat.completions.create(model="gpt-4o", messages=msgs)
                                 rep = strict_json_parse(res.choices[0].message.content)
                                 if not rep: 
-                                    rep = {
-                                        "score": 0, 
-                                        "speaking_score": 0, 
-                                        "reading_score": 0,
-                                        "pros": ["Analiz hatası oluştu."], 
-                                        "cons": ["Lütfen tekrar deneyin."]
-                                    }
+                                    rep = {"score": 0, "speaking_score": 0, "reading_score": 0, "pros": ["Error"], "cons": ["Error"]}
 
                                 user_data["lessons_completed"] += 1
                                 if "next_lesson_homework" in rep: 
@@ -743,6 +796,7 @@ if api_key:
                                     "score": rep.get("score"),
                                     "speaking_score": rep.get("speaking_score"),
                                     "reading_score": rep.get("reading_score"),
+                                    "words": st.session_state.target_vocab,
                                     "feedback_pros": rep.get("pros", []),
                                     "feedback_cons": rep.get("cons", [])
                                 }
