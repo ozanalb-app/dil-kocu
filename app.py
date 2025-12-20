@@ -13,7 +13,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v30.2 - Anki Edition", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v30.3 - Final Turkish Edition", page_icon="🧠", layout="wide")
 DATA_FILE = "user_data.json"
 
 # --- KELİME HAVUZU (HARDCODED) ---
@@ -386,13 +386,12 @@ if api_key:
     elif page == "🧠 Vocab Gym (Anki)":
         st.title("🧠 Vocabulary Gym (Anki SM-2)")
 
-        # --- EKLENEN KISIM: KELİME ÇALIŞIRKEN ÇIKIŞ BUTONU ---
+        # ÇIKIŞ BUTONU
         if st.button("🚪 Quit / Reset", type="secondary", key="vocab_exit"):
             st.session_state.srs_active_card = None
             st.session_state.srs_revealed = False
             st.session_state.srs_audio = None
             st.rerun()
-        # ----------------------------------------------------
 
         if "srs_active_card" not in st.session_state:
             st.session_state.srs_active_card = None
@@ -448,7 +447,6 @@ if api_key:
                 </div>
                 """, unsafe_allow_html=True)
             
-            # Auto-play audio
             if st.session_state.srs_audio:
                 st.audio(st.session_state.srs_audio, format='audio/mp3', autoplay=True)
 
@@ -657,16 +655,29 @@ if api_key:
                                     else:
                                         st.session_state.accumulated_speaking_time += len(txt.split()) * 0.7
                                         
+                                        # --- GRAMMAR CHECK FIX (CONTEXT AWARE) ---
+                                        last_question = "Unknown context"
+                                        for m in reversed(st.session_state.messages):
+                                            if m["role"] == "assistant":
+                                                last_question = m["content"]
+                                                break
+                                        
                                         corr = None
                                         try:
                                             p_check = f"""
-                                            Check this sentence: '{txt}'. 
-                                            STRICT RULES:
-                                            1. IGNORE missing articles (a, an, the).
-                                            2. IGNORE capitalization.
-                                            3. FOCUS ON: Verb tenses, wrong word choice, sentence structure.
-                                            4. If MAJOR error found, return 'Correction: [Corrected Sentence]'. 
-                                            5. If OK or only minor errors, return 'OK'.
+                                            The user is answering this question: "{last_question}"
+                                            The User said: '{txt}'
+                                            TASK: Check grammar and logic.
+                                            CRITICAL RULE FOR TENSES:
+                                            - Analyze the QUESTION to determine the required tense.
+                                            - If the question asks about the PAST (e.g., "What did you do?"), you MUST correct the user's sentence to PAST TENSE (e.g., "wake" -> "woke").
+                                            - If the question is about routine/present, keep present tense.
+                                            OTHER RULES:
+                                            - IGNORE missing articles (a, an, the).
+                                            - IGNORE capitalization.
+                                            OUTPUT FORMAT:
+                                            - If there is a tense mismatch with the question or a major error: return 'Correction: [Corrected Sentence]'.
+                                            - If it is grammatically acceptable: return 'OK'.
                                             """
                                             c_res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":p_check}])
                                             ans = c_res.choices[0].message.content
@@ -698,8 +709,6 @@ if api_key:
 
             else:
                 st.markdown("### 📖 Reading")
-                
-                # --- READING PHASE'de DE BİTİRME BUTONU ---
                 if st.button("🚪 Quit / Reset", type="primary"):
                      st.session_state.lesson_active = False
                      st.session_state.reading_phase = False
@@ -759,11 +768,12 @@ if api_key:
                                         "is_correct": true/false
                                     }}
                                 ],
-                                "pros": ["Strong point 1"], 
-                                "cons": ["Weak point 1"], 
+                                "pros": ["Olumlu yön 1 (Türkçe)", "Olumlu yön 2 (Türkçe)"], 
+                                "cons": ["Geliştirilmeli 1 (Türkçe)", "Geliştirilmeli 2 (Türkçe)"], 
                                 "grammar_topics": ["Topic to study"],
                                 "next_lesson_homework": {{"scenario": "...", "vocab": ["..."]}}
                             }}
+                            IMPORTANT: Provide 'pros' and 'cons' comments in TURKISH.
                             """
                             
                             msgs = st.session_state.messages + [{"role":"system","content":prompt}]
@@ -772,7 +782,7 @@ if api_key:
                                 res = client.chat.completions.create(model="gpt-4o", messages=msgs)
                                 rep = strict_json_parse(res.choices[0].message.content)
                                 if not rep: 
-                                    rep = {"score": 0, "speaking_score": 0, "reading_score": 0, "pros": ["Error"], "cons": ["Error"]}
+                                    rep = {"score": 0, "speaking_score": 0, "reading_score": 0, "pros": ["Hata"], "cons": ["Hata"]}
 
                                 user_data["lessons_completed"] += 1
                                 if "next_lesson_homework" in rep: 
@@ -813,6 +823,11 @@ if api_key:
                         st.success("\n".join(rep.get('pros') or []))
                     with c2:
                         st.error("\n".join(rep.get('cons') or []))
+                    
+                    # --- JSON OUTPUT DISPLAY ---
+                    with st.expander("🔧 Debug: Raw Analysis Data"):
+                        st.json(rep)
+                    # ---------------------------
 
                     if st.button("🚀 START NEXT LESSON (Hard Reset)"):
                         st.session_state.lesson_active = False
