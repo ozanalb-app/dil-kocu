@@ -868,7 +868,7 @@ if api_key:
                                         st.write(msg["content"])
 
                     if "last_audio_response" in st.session_state and st.session_state.last_audio_response:
-                        st.audio(st.session_state.last_audio_response, format="audio/mpeg")
+                        st.audio(st.session_state.last_audio_response, format="audio/mpeg", autoplay=True)
 
                     st.write("---")
                     c1, c2 = st.columns([1,4])
@@ -1163,6 +1163,7 @@ if api_key:
                             st.rerun()
 else:
     st.warning("Enter API Key")
+
 
 
 
