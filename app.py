@@ -408,6 +408,21 @@ if api_key:
             st.session_state.lesson_active = False
             st.session_state.exam_data = None
             st.rerun()
+        st.divider() # Görsel bir ayırıcı çizgi
+        st.markdown("### ⚠️ Fabrika Ayarlarına Dön")
+        
+        # Sıfırlama Butonu
+        if st.button("🔥 TÜM GEÇMİŞİ SIFIRLA", type="primary", use_container_width=True, help="Tüm ilerlemeni ve seviyeni siler, en başa döner."):
+            # 1. JSON Dosyasını Sil
+            if os.path.exists(DATA_FILE):
+                os.remove(DATA_FILE)
+            
+            # 2. Session State'i Temizle (Hafızayı boşalt)
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            
+            # 3. Sayfayı Yenile (Uygulama dosyayı bulamayıp yeniden oluşturacak)
+            st.rerun()
         st.divider()
         
     # --- SINAV MODU ---
@@ -1163,6 +1178,7 @@ if api_key:
                             st.rerun()
 else:
     st.warning("Enter API Key")
+
 
 
 
