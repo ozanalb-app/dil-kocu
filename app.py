@@ -167,7 +167,34 @@ def determine_sub_level(level, lessons_completed):
     if cycle < 3: return "Low"
     elif cycle < 7: return "Medium"
     else: return "High"
+        
+import difflib # En tepeye import olarak da ekleyebilirsin ama burada da çalışır
 
+def create_colored_diff(user_text, corrected_text):
+    """
+    Kullanıcının cümlesi ile doğrusunu karşılaştırır.
+    Aynı olan kelimeleri YEŞİL, değişen/eklenen (düzeltilen) kelimeleri KIRMIZI yapar.
+    """
+    # Noktalama işaretlerini temizleyerek karşılaştırma yapmak daha sağlıklı sonuç verir
+    u_words = user_text.split()
+    c_words = corrected_text.split()
+    
+    matcher = difflib.SequenceMatcher(None, u_words, c_words)
+    result = []
+
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        segment = " ".join(c_words[j1:j2])
+        if not segment: continue
+            
+        if tag == 'equal':
+            # Kullanıcı doğru söylemiş -> YEŞİL
+            result.append(f":green[{segment}]")
+        else:
+            # Burası değiştirilmiş veya eklenmiş (Düzeltme) -> KIRMIZI
+            result.append(f":red[{segment}]")
+            
+    return " ".join(result)
+    
 def generate_dynamic_vocab(client, scenario, level, user_data):
     used = set(user_data.get("used_words", []))
     available = [w for w in STATIC_VOCAB_POOL if w not in used]
@@ -848,7 +875,11 @@ if api_key:
                             elif msg["role"] == "user":
                                 if "correction" in msg:
                                     with st.expander("🛠️ Grammar Correction", expanded=True):
-                                        st.markdown(f"**Doğrusu:** :green[{msg['correction']}]")
+                                        # Diff fonksiyonunu çağırıp renkli stringi alıyoruz
+                                        colored_diff = create_colored_diff(msg['content'], msg['correction'])
+                                        st.markdown(f"**Analiz:** {colored_diff}")
+                                        # Dilersen altına düz metin olarak da doğrusunu yazdırabilirsin:
+                                        st.caption(f"Tam Cümle: {msg['correction']}")
                                 with st.chat_message("user", avatar="👤"):
                                     st.write(msg["content"])
                             elif msg["role"] == "assistant":
@@ -1184,6 +1215,7 @@ if api_key:
             st.rerun()
 else:
     st.warning("Enter API Key")
+
 
 
 
