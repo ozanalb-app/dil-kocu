@@ -18,7 +18,46 @@ DATA_FILE = "user_data.json"
 
 # --- KELİME HAVUZU (HARDCODED) ---
 STATIC_VOCAB_POOL = [
-"ask", "answer", "explain", "describe", "decide", "choose", "invite", "agree", "disagree", "believe", "hope", "plan", "prepare", "practice", "improve", "change", "continue", "share", "miss", "travel", "order", "pay", "save", "spend", "return", "borrow", "lend", "arrive", "leave", "follow", "stop", "wait", "remember", "forget", "cancel", "delay", "confirm", "refuse", "accept", "suggest", "recommend", "expect", "manage", "control", "avoid", "compare", "depend", "protect", "allow", "require", "solve", "influence", "reduce", "increase", "develop", "organize", "arrange", "replace", "repair", "contact", "complain", "request", "respond", "apologize", "promise", "warn", "encourage", "support", "handle", "check", "review", "apply", "hire", "fire", "retire", "job", "work", "office", "company", "meeting", "project", "task", "goal", "target", "problem", "solution", "idea", "opinion", "experience", "skill", "responsibility", "duty", "role", "position", "contract", "agreement", "policy", "rule", "system", "process", "result", "outcome", "reason", "cause", "effect", "decision", "choice", "option", "condition", "situation", "opportunity", "risk", "advantage", "disadvantage", "progress", "success", "failure", "mistake", "effort", "challenge", "chance", "future", "past", "present", "time", "schedule", "deadline", "appointment", "period", "priority", "balance", "routine", "habit", "pressure", "stress", "price", "cost", "value", "budget", "bill", "payment", "service", "quality", "reservation", "ticket", "trip", "journey", "holiday", "transport", "destination", "route", "distance", "relationship", "trust", "respect", "argument", "discussion", "conflict", "cooperation", "communication", "feedback", "important", "different", "similar", "possible", "impossible", "common", "simple", "difficult", "clear", "unclear", "serious", "normal", "special", "effective", "efficient", "successful", "unsuccessful", "early", "late", "busy", "ready", "safe", "dangerous", "careful", "comfortable", "uncomfortable", "popular", "useful", "useless", "suitable", "unsuitable", "familiar", "unfamiliar", "available", "unavailable", "necessary", "unnecessary", "flexible", "responsible", "independent", "confident", "nervous", "satisfied", "disappointed", "motivated", "bored", "focused", "society", "culture", "tradition", "organization", "institution", "law", "regulation", "government", "authority", "public", "private", "community", "population", "economy", "industry", "market", "competition", "technology", "internet", "information", "data", "online", "digital", "platform", "software", "device", "network", "security", "privacy", "media", "content", "resource", "access", "update", "study", "learn", "teach", "subject", "course", "lesson", "class", "education", "academic", "level", "degree", "certificate", "revise", "memorize", "understand", "misunderstand", "concentrate", "focus", "attend", "skip", "participate", "exam", "test", "quiz", "midterm", "final", "grade", "mark", "score", "pass", "fail", "homework", "assignment", "teacher", "student", "classmate", "tutor", "principal", "menu", "waiter", "waitress", "server", "customer", "table", "seat", "tip", "receipt", "change", "coffee", "tea", "latte", "espresso", "soft drink", "juice", "water", "sandwich", "dessert", "snack", "meal", "breakfast", "lunch", "dinner", "takeaway", "eat in", "refill", "chat", "talk", "gossip", "joke", "laugh", "argue", "feel", "enjoy", "prefer", "like", "dislike", "love", "hate", "surprise", "worry", "relax", "calm", "excited", "tired", "stressed", "friend", "best friend", "group", "team", "help", "favor", "join", "hang out", "meet", "introduce", "advice", "suggestion", "point", "excuse", "actually", "especially", "usually", "probably", "maybe", "instead", "however", "although", "because", "while", "unless", "enough", "too", "quite"
+"ask", "answer", "explain", "describe", "decide", "choose", "invite", "agree", 
+    "disagree", "believe", "hope", "plan", "prepare", "practice", "improve", 
+    "change", "continue", "share", "miss", "travel", "order", "pay", "save", 
+    "spend", "return", "borrow", "lend", "arrive", "leave", "follow", "stop", 
+    "wait", "remember", "forget", "cancel", "delay", "confirm", "refuse", "accept", 
+    "suggest", "recommend", "expect", "manage", "control", "avoid", "compare", "depend", 
+    "protect", "allow", "require", "solve", "influence", "reduce", "increase", "develop", 
+    "organize", "arrange", "replace", "repair", "contact", "complain", "request", "respond", 
+    "apologize", "promise", "warn", "encourage", "support", "handle", "check", "review", 
+    "apply", "hire", "fire", "retire", "job", "work", "office", "company", "meeting", 
+    "project", "task", "goal", "target", "problem", "solution", "idea", "opinion", "experience", 
+    "skill", "responsibility", "duty", "role", "position", "contract", "agreement", "policy", 
+    "rule", "system", "process", "result", "outcome", "reason", "cause", "effect", "decision", 
+    "choice", "option", "condition", "situation", "opportunity", "risk", "advantage", "disadvantage", 
+    "progress", "success", "failure", "mistake", "effort", "challenge", "chance", "future", "past", 
+    "present", "time", "schedule", "deadline", "appointment", "period", "priority", "balance", 
+    "routine", "habit", "pressure", "stress", "price", "cost", "value", "budget", "bill", "payment", 
+    "service", "quality", "reservation", "ticket", "trip", "journey", "holiday", "transport", "destination", 
+    "route", "distance", "relationship", "trust", "respect", "argument", "discussion", "conflict", 
+    "cooperation", "communication", "feedback", "important", "different", "similar", "possible", 
+    "impossible", "common", "simple", "difficult", "clear", "unclear", "serious", "normal", "special", 
+    "effective", "efficient", "successful", "unsuccessful", "early", "late", "busy", "ready", "safe", 
+    "dangerous", "careful", "comfortable", "uncomfortable", "popular", "useful", "useless", "suitable", 
+    "unsuitable", "familiar", "unfamiliar", "available", "unavailable", "necessary", "unnecessary", 
+    "flexible", "responsible", "independent", "confident", "nervous", "satisfied", "disappointed", "motivated", 
+    "bored", "focused", "society", "culture", "tradition", "organization", "institution", "law", "regulation", 
+    "government", "authority", "public", "private", "community", "population", "economy", "industry", "market", 
+    "competition", "technology", "internet", "information", "data", "online", "digital", "platform", "software", 
+    "device", "network", "security", "privacy", "media", "content", "resource", "access", "update", "study", 
+    "learn", "teach", "subject", "course", "lesson", "class", "education", "academic", "level", "degree", 
+    "certificate", "revise", "memorize", "understand", "misunderstand", "concentrate", "focus", "attend", 
+    "skip", "participate", "exam", "test", "quiz", "midterm", "final", "grade", "mark", "score", "pass", 
+    "fail", "homework", "assignment", "teacher", "student", "classmate", "tutor", "principal", "menu", 
+    "waiter", "waitress", "server", "customer", "table", "seat", "tip", "receipt", "change", "coffee", 
+    "tea", "latte", "espresso", "soft drink", "juice", "water", "sandwich", "dessert", "snack", "meal", "breakfast", 
+    "lunch", "dinner", "takeaway", "eat in", "refill", "chat", "talk", "gossip", "joke", "laugh", "argue", "feel", 
+    "enjoy", "prefer", "like", "dislike", "love", "hate", "surprise", "worry", "relax", "calm", "excited", 
+    "tired", "stressed", "friend", "best friend", "group", "team", "help", "favor", "join", "hang out", "meet", 
+    "introduce", "advice", "suggestion", "point", "excuse", "actually", "especially", "usually", "probably", 
+    "maybe", "instead", "however", "although", "because", "while", "unless", "enough", "too", "quite"
 ]
 
 # --- HALÜSİNASYON FİLTRESİ ---
@@ -1189,6 +1228,7 @@ if api_key:
             st.rerun()
 else:
     st.warning("Enter API Key")
+
 
 
 
