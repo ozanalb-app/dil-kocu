@@ -9,14 +9,15 @@ import io
 import time
 import re
 import math
+import base64  # <--- YENİ EKLENDİ
 import pandas as pd
 from datetime import datetime, timedelta
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Pınar's Friend v35 - Level Assessment", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Pınar's Friend v37 - iOS Master", page_icon="🧠", layout="wide")
 DATA_FILE = "user_data.json"
 
-# --- KELİME HAVUZU (HARDCODED) ---
+# --- KELİME HAVUZU ---
 STATIC_VOCAB_POOL = [
     "ask", "answer", "explain", "describe", "decide", "choose", "invite", "agree", "disagree", "believe", 
     "hope", "plan", "prepare", "practice", "improve", "change", "continue", "share", "miss", "travel", 
@@ -56,281 +57,183 @@ BANNED_PHRASES = [
 ]
 _BANNED_PATTERNS = [re.compile(rf"\b{re.escape(p.lower())}\b") for p in BANNED_PHRASES]
 
-# --- 2. SENARYO HAVUZU ---
+# --- SENARYO HAVUZU ---
 SCENARIO_POOL = [
-    "Parent teacher meeting",
-    "Coffee Shop: Ordering a Latte with Oat Milk",
-    "Hotel Reception: Checking in and Asking for Wi-Fi",
-    "Street: Asking a Stranger for Directions to the Metro",
-    "Restaurant: Asking for a Menu and Water",
-    "Shop: Asking for the Price of a T-Shirt",
-    "Pharmacy: Buying Aspirin for a Headache",
-    "Taxi: Telling the Driver Where to Go",
-    "Supermarket: Asking Where the Milk is",
-    "Library: Registering for a Membership Card",
-    "Cinema: Buying Two Tickets for a Comedy",
-    "Clothing Store: Returning a Defective Shirt",
-    "Restaurant: Complaining About Cold Food",
-    "Train Station: Buying a Ticket and Asking for Platform",
-    "Doctor's Office: Describing Symptoms (Fever/Cough)",
-    "Hotel: Complaining About Noise from Next Door",
-    "Airport Check-in: Requesting a Window Seat",
-    "Job Interview: Answering 'Tell me about your experience'",
-    "Bank: Opening a New Account",
-    "Police Station: Reporting a Lost Wallet",
-    "Tech Support: Internet Connection is Not Working",
-    "Work: Negotiating a Deadline Extension with Boss",
-    "Real Estate: Viewing an Apartment and Asking Details",
-    "Car Rental: Negotiating Insurance Costs",
-    "University: Asking a Professor for Feedback",
-    "Insurance Company: Reporting a Car Accident",
-    "Work: Resolving a Conflict with a Colleague",
-    "Service: Canceling a Gym Membership (Hard Sell)",
-    "Customs/Immigration: Explaining Purpose of Visit",
-    "Event: Networking and Introducing Yourself",
-    "Store: Haggle over the price of an antique"
+    "Parent teacher meeting", "Coffee Shop: Ordering a Latte", "Hotel Reception: Checking in",
+    "Street: Asking for Directions", "Restaurant: Ordering Food", "Shop: Buying Clothes",
+    "Pharmacy: Buying Medicine", "Taxi: Giving Directions", "Supermarket: Shopping",
+    "Job Interview", "Bank: Opening Account", "Doctor: Describing Symptoms"
 ]
 
-# --- 3. YARDIMCI FONKSİYONLAR ---
+# --- YEDEK SINAV VERİSİ ---
+BACKUP_EXAM_DATA = {
+    "VOCABULARY": [
+        {"question": "A place where you can borrow books without buying them.", "options": ["Library", "Bookstore", "Pharmacy", "Bank"], "answer": "Library"},
+        {"question": "To come to a place after traveling.", "options": ["Arrive", "Leave", "Stay", "Live"], "answer": "Arrive"},
+        {"question": "A person who works in a hospital and helps doctors.", "options": ["Nurse", "Engineer", "Teacher", "Driver"], "answer": "Nurse"},
+    ] * 5,
+    "GRAMMAR": [
+        {"sentence": "She ____ (go) to the cinema yesterday.", "answer": "went"},
+        {"sentence": "I have never ____ (see) that movie.", "answer": "seen"},
+        {"sentence": "If it rains, we ____ (stay) at home.", "answer": "will stay"},
+    ] * 5,
+    "READING": {
+        "text": """
+        Sarah loves weekends. On Saturdays, she usually wakes up at 9 AM and has a big breakfast with her family. They eat eggs, toast, and drink orange juice. After breakfast, Sarah goes to the park to play tennis with her friends. She has been playing tennis for five years and is very good at it. 
+        
+        This Saturday was different, however. It rained heavily all day, so Sarah could not go to the park. Instead, she decided to stay home and read a book. Her brother, Tom, played video games in the living room. Their mother baked a chocolate cake, which made the whole house smell delicious. Although she couldn't play tennis, Sarah enjoyed her relaxing day indoors. She realized that sometimes doing nothing is the best way to rest.
+        """,
+        "questions": [
+            {"question": "What does Sarah usually do on Saturday mornings?", "options": ["Goes to school", "Plays tennis", "Has a big breakfast", "Sleeps until noon"], "answer": "Has a big breakfast"},
+            {"question": "Why didn't Sarah go to the park this Saturday?", "options": ["She was sick", "It was raining", "Her friends were busy", "She wanted to read"], "answer": "It was raining"},
+            {"question": "How long has Sarah been playing tennis?", "options": ["Five years", "Two years", "Since last year", "Ten years"], "answer": "Five years"},
+            {"question": "What did Sarah's mother do?", "options": ["Played video games", "Went to work", "Baked a cake", "Read a book"], "answer": "Baked a cake"},
+            {"question": "How did Sarah feel about her day in the end?", "options": ["Bored", "Angry", "Sad", "Relaxed"], "answer": "Relaxed"}
+        ]
+    },
+    "SPEAKING_TOPIC": "Describe your favorite way to spend a rainy day."
+}
+
+# --- YARDIMCI FONKSİYONLAR ---
 def load_data():
     if not os.path.exists(DATA_FILE):
-        return {
-            "current_level": "A2",
-            "lessons_completed": 0,
-            "vocab_srs": [], 
-            "completed_scenarios": [],
-            "lesson_history": [],
-            "next_lesson_prep": None,
-            "used_words": []
-        }
+        return {"current_level": "A2", "lessons_completed": 0, "vocab_srs": [], "completed_scenarios": [], "lesson_history": [], "next_lesson_prep": None, "used_words": []}
     with open(DATA_FILE, "r") as f:
-        try:
-            data = json.load(f)
-        except json.JSONDecodeError:
-            if os.path.exists(DATA_FILE): os.rename(DATA_FILE, DATA_FILE + ".bak")
-            return load_data()
-
-        defaults = {
-            "completed_scenarios": [],
-            "vocab_srs": [],
-            "next_lesson_prep": None,
-            "lesson_history": [],
-            "used_words": []
-        }
-        if "error_bank" in data: del data["error_bank"]
-        for k, v in defaults.items():
-            if k not in data: data[k] = v
-        return data
+        try: return json.load(f)
+        except: return load_data()
 
 def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    with open(DATA_FILE, "w") as f: json.dump(data, f, indent=4)
 
 def strict_json_parse(text):
     text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(json)?|```$", "", text, flags=re.MULTILINE).strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        try:
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start != -1 and end != -1:
-                return json.loads(text[start:end])
-        except:
-            return {}
+    if text.startswith("```"): text = re.sub(r"^```(json)?|```$", "", text, flags=re.MULTILINE).strip()
+    try: return json.loads(text)
     except:
-        return {}
+        try: 
+            s = text.find("{"); e = text.rfind("}") + 1
+            return json.loads(text[s:e])
+        except: return {}
 
 def determine_sub_level(level, lessons_completed):
     cycle = lessons_completed % 10
     if cycle < 3: return "Low"
-    elif cycle < 7: return "Medium"
+    elif cycle < 7: return "Mid"
     else: return "High"
+
+# --- YENİ EKLENEN: iPHONE UYUMLU SES OYNATICI ---
+def autoplay_audio(audio_bytes):
+    """
+    iPhone/Safari ve Android uyumlu HTML5 Base64 Ses Oynatıcı.
+    """
+    b64 = base64.b64encode(audio_bytes).decode()
+    md = f"""
+        <audio controls autoplay>
+        <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+        Your browser does not support the audio element.
+        </audio>
+    """
+    st.markdown(md, unsafe_allow_html=True)
+# ------------------------------------------------
 
 def generate_dynamic_vocab(client, scenario, level, user_data):
     used = set(user_data.get("used_words", []))
     available = [w for w in STATIC_VOCAB_POOL if w not in used]
-    
-    if len(available) < 10:
-        available = STATIC_VOCAB_POOL
-        user_data["used_words"] = [] 
-    
+    if len(available) < 10: available = STATIC_VOCAB_POOL
     random.shuffle(available)
     candidates = available[:60]
-    
-    prompt = f"""
-    Select exactly 5 English words from this list that are MOST relevant to the scenario: "{scenario}".
-    CANDIDATES: {', '.join(candidates)}
-    OUTPUT ONLY A JSON ARRAY of strings. Example: ["word1", "word2", "word3", "word4", "word5"]
-    """
+    prompt = f"Select 5 relevant words for '{scenario}' from: {', '.join(candidates)}. JSON Array output."
     try:
         res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": prompt}])
-        words = strict_json_parse(res.choices[0].message.content)
-        if isinstance(words, list) and len(words) > 0:
-            return words[:5]
-        else:
-            return candidates[:5]
-    except:
-        return candidates[:5]
+        return strict_json_parse(res.choices[0].message.content)[:5]
+    except: return candidates[:5]
 
-# --- 4 BÖLÜMLÜ SINAV SORUSU ---
 def generate_exam_questions(client, level):
     prompt = f"""
     Create a comprehensive {level} level English exam JSON structure with 4 PARTS.
     KEYS MUST BE: "VOCABULARY", "GRAMMAR", "READING", "SPEAKING_TOPIC".
     
     1. VOCABULARY: 15 multiple-choice questions. 
-       Format: {{"question": "Long sentence describing a word...", "options": ["Word A", "Word B", "Word C", "Word D"], "answer": "Word A"}}
+       Format: {{"question": "Long definition sentence...", "options": ["Word A", "Word B", "Word C", "Word D"], "answer": "Word A"}}
        
     2. GRAMMAR: 15 fill-in-the-blank questions. 
        Format: {{"sentence": "She ____ (go) yesterday.", "answer": "went"}}
        
-    3. READING: A text (approx 10 sentences) and 5 multiple-choice questions.
+    3. READING: 
+       - A text paragraph (Minimum 10 sentences, approx 150 words).
+       - 5 Multiple choice questions based on the text.
        Format: {{
-           "text": "Full reading text content...",
+           "text": "Full text here...",
            "questions": [
-               {{"question": "Q1...", "options": ["A", "B", "C", "D"], "answer": "A"}}
+               {{"question": "...", "options": ["A", "B", "C", "D"], "answer": "A"}}
            ]
        }}
        
-    4. SPEAKING_TOPIC: A simple string topic (e.g. "Talk about your favorite holiday").
+    4. SPEAKING_TOPIC: String (e.g. "Talk about your hobbies").
     
     OUTPUT RAW JSON ONLY.
     """
     try:
         res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user", "content":prompt}])
         data = strict_json_parse(res.choices[0].message.content)
-        
-        normalized_data = {}
-        for k, v in data.items():
-            normalized_data[k.upper()] = v
-            
-        if "VOCABULARY" not in normalized_data: normalized_data["VOCABULARY"] = []
-        if "GRAMMAR" not in normalized_data: normalized_data["GRAMMAR"] = []
-        if "READING" not in normalized_data: normalized_data["READING"] = {"text": "Error.", "questions": []}
-        if "SPEAKING_TOPIC" not in normalized_data: normalized_data["SPEAKING_TOPIC"] = "Describe your daily routine."
-        
-        return normalized_data
-    except Exception as e:
-        print(f"Exam Gen Error: {e}")
-        return None
+        normalized = {}
+        for k, v in data.items(): normalized[k.upper()] = v
+        if "READING" not in normalized or "questions" not in normalized["READING"]:
+            return BACKUP_EXAM_DATA 
+        return normalized
+    except:
+        return BACKUP_EXAM_DATA
 
-# --- SRS MANTIĞI ---
+# --- SRS VE SM-2 ---
 def calculate_sm2(quality, prev_interval, prev_ease_factor):
-    new_ease_factor = prev_ease_factor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
-    if new_ease_factor < 1.3: new_ease_factor = 1.3
-
-    if quality < 3: 
-        new_interval = 0 
+    new_ef = prev_ease_factor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
+    if new_ef < 1.3: new_ef = 1.3
+    if quality < 3: new_int = 0
     else:
-        if prev_interval == 0: new_interval = 1
-        elif prev_interval == 1: new_interval = 6 if quality > 3 else 3
-        else:
-            new_interval = math.ceil(prev_interval * new_ease_factor)
-            if quality == 3: new_interval = max(prev_interval + 1, math.floor(new_interval * 0.8))
-
-    return new_interval, new_ease_factor
+        if prev_interval == 0: new_int = 1
+        elif prev_interval == 1: new_int = 6 if quality > 3 else 3
+        else: new_int = math.ceil(prev_interval * new_ef)
+    return new_int, new_ef
 
 def get_next_srs_card(data, session_seen):
     now = time.time()
     srs_list = data.get("vocab_srs", [])
-    
-    due_cards = [
-        card for card in srs_list 
-        if card.get("next_review_ts", 0) <= now and card["word"] not in session_seen
-    ]
-    if due_cards:
-        due_cards.sort(key=lambda x: x.get("next_review_ts", 0))
-        return due_cards[0], "review"
-    
+    due = [c for c in srs_list if c.get("next_review_ts", 0) <= now and c["word"] not in session_seen]
+    if due: 
+        due.sort(key=lambda x: x.get("next_review_ts", 0))
+        return due[0], "review"
     srs_words = {c["word"] for c in srs_list}
-    new_candidates = [
-        w for w in STATIC_VOCAB_POOL 
-        if w not in srs_words and w not in session_seen
-    ]
-    if new_candidates:
-        return {"word": random.choice(new_candidates)}, "new"
-    
+    new_cands = [w for w in STATIC_VOCAB_POOL if w not in srs_words and w not in session_seen]
+    if new_cands: return {"word": random.choice(new_cands)}, "new"
     return None, None
 
 def update_srs_card_sm2(data, word_obj, quality):
     srs_list = data.get("vocab_srs", [])
-    existing_idx = next((i for i, item in enumerate(srs_list) if item["word"] == word_obj["word"]), -1)
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-    
-    if existing_idx == -1:
-        card = word_obj.copy()
-        card["times_seen"] = 0
-        card["interval"] = 0
-        card["ease_factor"] = 2.5 
-        card["history"] = []
-    else:
-        card = srs_list[existing_idx]
-        if "ease_factor" not in card: card["ease_factor"] = 2.5
-        if "interval" not in card: card["interval"] = 0
-
-    prev_int = card.get("interval", 0)
-    prev_ef = card.get("ease_factor", 2.5)
-    new_int, new_ef = calculate_sm2(quality, prev_int, prev_ef)
-    
-    card["interval"] = new_int
-    card["ease_factor"] = new_ef
-    card["times_seen"] = card.get("times_seen", 0) + 1
-    card["last_review"] = now_str
-    
-    next_ts = time.time() + (new_int * 24 * 60 * 60)
-    if quality == 0: next_ts = time.time() + (10 * 60) 
-        
-    card["next_review_ts"] = next_ts
-    if "history" not in card: card["history"] = []
-    card["history"].append({"date": now_str, "quality": quality, "next_int": new_int})
-
-    if existing_idx == -1: srs_list.append(card)
-    else: srs_list[existing_idx] = card
-        
+    idx = next((i for i, item in enumerate(srs_list) if item["word"] == word_obj["word"]), -1)
+    if idx == -1:
+        card = word_obj.copy(); card.update({"times_seen":0, "interval":0, "ease_factor":2.5, "history":[]})
+    else: card = srs_list[idx]
+    n_int, n_ef = calculate_sm2(quality, card.get("interval",0), card.get("ease_factor",2.5))
+    card.update({"interval": n_int, "ease_factor": n_ef, "times_seen": card.get("times_seen",0)+1})
+    card["next_review_ts"] = time.time() + (n_int * 86400)
+    if quality == 0: card["next_review_ts"] = time.time() + 600
+    if idx == -1: srs_list.append(card)
+    else: srs_list[idx] = card
     data["vocab_srs"] = srs_list
     save_data(data)
 
 user_data = load_data()
 
-# --- 4. DERS MANTIĞI ---
+# --- DERS MANTIĞI ---
 def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scenario=None):
-    sub_level = determine_sub_level(level, user_data["lessons_completed"])
-    full_level_desc = f"{level} ({sub_level})"
-    
-    if forced_scenario:
-        scenario = forced_scenario
+    sub = determine_sub_level(level, user_data["lessons_completed"])
+    if forced_scenario: sc = forced_scenario
     else:
-        completed_scenarios = [h.get("topic") for h in user_data.get("lesson_history", [])]
-        available_scenarios = [s for s in SCENARIO_POOL if s not in completed_scenarios]
-        if not available_scenarios: available_scenarios = SCENARIO_POOL
-        scenario = random.choice(available_scenarios)
+        done = [h.get("topic") for h in user_data.get("lesson_history", [])]
+        avail = [s for s in SCENARIO_POOL if s not in done]
+        sc = random.choice(avail if avail else SCENARIO_POOL)
 
-    target_vocab = generate_dynamic_vocab(client, scenario, level, user_data)
-    
-    for w in target_vocab:
-        if w not in user_data["used_words"]:
-            user_data["used_words"].append(w)
-    save_data(user_data)
-
-    if mode == "EXAM":
-        system_role = "ACT AS: Strict Examiner." 
-    else:
-        system_role = f"""
-        ACT AS A ROLEPLAYER for: '{scenario}'. 
-        LEVEL: {full_level_desc}.
-        **INSTRUCTIONS:**
-        1. FIRST MESSAGE: Ignore the scenario for a second. Start by warmly greeting Pınar and asking: "Hello Pınar, what did you do today?" (in English).
-        2. WAIT for her answer about her day.
-        3. AFTER she answers about her day: Acknowledge it briefly, then IMMEDIATELY TRANSITION into the roleplay scenario '{scenario}' as your character.
-        **ROLEPLAY RULES (After transition):**
-        - Keep responses SHORT (Max 25 words).
-        - NEVER say "Good job".
-        - MANDATORY: End every response with a relevant QUESTION about the scenario.
-        """
-
+    vocab = generate_dynamic_vocab(client, sc, level, user_data)
     st.session_state.lesson_active = True
     st.session_state.current_mode = mode
     st.session_state.reading_phase = False
@@ -338,809 +241,326 @@ def start_lesson_logic(client, level, mode, target_speaking_minutes, forced_scen
     st.session_state.final_report = None
     st.session_state.accumulated_speaking_time = 0.0
     st.session_state.target_speaking_seconds = target_speaking_minutes * 60
-    st.session_state.target_vocab = target_vocab
-    st.session_state.scenario = scenario
-    st.session_state.last_audio_bytes = None
-    st.session_state.display_messages = []
-
-    mode_icon = "📝 EXAM MODE" if mode == "EXAM" else "🎭 PRACTICE MODE"
-    context_msg = f"{mode_icon}\n**SCENARIO:** {scenario}\n🔑 **WORDS:** {', '.join(target_vocab)}"
-    st.session_state.display_messages.append({"role": "info", "content": context_msg})
-
-    intro_prompt = f"{system_role}\nStart the conversation now with the greeting."
-    st.session_state.messages = [{"role": "system", "content": intro_prompt}]
-
+    st.session_state.target_vocab = vocab
+    st.session_state.scenario = sc
+    st.session_state.messages = [{"role": "system", "content": f"ACT AS ROLEPLAYER: {sc}. Level: {level}. Ask 'Hello Pınar, what did you do today?' first."}]
+    
     try:
         res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
         msg = res.choices[0].message.content
-        tr_res = client.chat.completions.create(model="gpt-4o", messages=[{"role": "user", "content": f"Translate to Turkish: {msg}"}])
-        tr_msg = tr_res.choices[0].message.content
-        st.session_state.messages.append({"role": "assistant", "content": msg})
-        st.session_state.display_messages.append({"role": "assistant", "content": msg, "tr_content": tr_msg})
+        tr_msg = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":f"Translate: {msg}"}]).choices[0].message.content
+        st.session_state.display_messages = [{"role":"assistant", "content":msg, "tr_content":tr_msg}]
+        st.session_state.messages.append({"role":"assistant", "content":msg})
+        
         tts = gTTS(text=msg, lang='en')
-        fp = io.BytesIO()
-        tts.write_to_fp(fp)
+        fp = io.BytesIO(); tts.write_to_fp(fp)
         st.session_state.last_audio_response = fp.getvalue()
-    except Exception as e:
-        st.error(f"Başlatma hatası: {e}")
-        st.session_state.lesson_active = False
+    except: st.error("Start Error")
 
-# --- 5. ARAYÜZ ---
-if "OPENAI_API_KEY" in st.secrets:
-    api_key = st.secrets["OPENAI_API_KEY"]
-else:
-    with st.sidebar:
-        api_key = st.text_input("API Key", type="password")
+# --- ARAYÜZ ---
+if "OPENAI_API_KEY" in st.secrets: api_key = st.secrets["OPENAI_API_KEY"]
+else: 
+    with st.sidebar: api_key = st.text_input("API Key", type="password")
 
 if api_key:
     client = OpenAI(api_key=api_key)
-
+    
     with st.sidebar:
         st.title("🎓 Pınar's Academy")
-        sub = determine_sub_level(user_data['current_level'], user_data['lessons_completed'])
         c1, c2 = st.columns(2)
-        with c1: st.metric("Level", user_data['current_level'])
-        with c2: st.metric("Band", sub)
-        st.caption(f"Lessons Completed: {user_data['lessons_completed']}")
-
+        c1.metric("Level", user_data['current_level'])
+        c2.metric("Lessons", user_data['lessons_completed'])
+        
         st.divider()
         if st.button("📝 Take Level Exam", type="primary", use_container_width=True):
-            st.session_state.exam_active = True 
+            st.session_state.exam_active = True
             st.session_state.lesson_active = False
             st.session_state.exam_data = None
             st.rerun()
         st.divider()
-        
+
     # --- SINAV MODU ---
     if st.session_state.get("exam_active", False):
         st.title("📝 Level Assessment Exam")
         
         if "exam_data" not in st.session_state or st.session_state.exam_data is None:
-            with st.spinner(f"Preparing {user_data['current_level']} Exam (4 Sections)..."):
-                st.session_state.exam_data = generate_exam_questions(client, user_data["current_level"])
+            with st.spinner("Preparing Exam (Vocab, Grammar, Reading, Speaking)..."):
+                data = generate_exam_questions(client, user_data['current_level'])
+                st.session_state.exam_data = data
                 st.session_state.exam_answers = {}
-                st.session_state.exam_step = 1 
-                
-                if not st.session_state.exam_data or not st.session_state.exam_data.get("VOCABULARY"):
-                    st.error("⚠️ Sınav yüklenirken hata oluştu.")
-                    if st.button("♻️ Tekrar Dene"):
-                        st.session_state.exam_data = None
-                        st.rerun()
-                    if st.button("Çıkış"):
-                        st.session_state.exam_active = False
-                        st.rerun()
+                st.session_state.exam_step = 1
+                st.rerun()
         
         data = st.session_state.exam_data
         
-        if data and data.get("VOCABULARY"):
-            # --- ADIM 1: VOCABULARY ---
-            if st.session_state.exam_step == 1:
-                st.subheader("Part 1: Vocabulary (15 Questions)")
-                st.progress(20)
-                st.info("Find the word matching the definition.")
-                with st.form("exam_vocab"):
-                    for i, q in enumerate(data.get("VOCABULARY", [])[:15]): 
-                        st.write(f"**{i+1}.** {q['question']}")
-                        st.session_state.exam_answers[f"v_{i}"] = st.radio(f"Option for Q{i+1}", q['options'], key=f"v_radio_{i}", label_visibility="collapsed")
-                        st.write("---")
-                    if st.form_submit_button("Next Section ➡️"):
-                        st.session_state.exam_step = 2
-                        st.rerun()
-
-            # --- ADIM 2: GRAMMAR ---
-            elif st.session_state.exam_step == 2:
-                st.subheader("Part 2: Grammar (15 Questions)")
-                st.progress(40)
-                st.info("Fill in the blanks.")
-                with st.form("exam_grammar"):
-                    for i, q in enumerate(data.get("GRAMMAR", [])[:15]):
-                        st.write(f"**{i+1}.** {q['sentence']}")
-                        st.session_state.exam_answers[f"g_{i}"] = st.text_input(f"Answer for Q{i+1}", key=f"g_input_{i}")
-                        st.write("---")
-                    if st.form_submit_button("Next Section ➡️"):
-                        st.session_state.exam_step = 3
-                        st.rerun()
-
-            # --- ADIM 3: READING ---
-            elif st.session_state.exam_step == 3:
-                st.subheader("Part 3: Reading Comprehension")
-                st.progress(60)
-                
-                reading_data = data.get("READING", {})
-                st.markdown(f"### 📄 Read the Text:\n\n> {reading_data.get('text', 'No text loaded.')}")
-                st.divider()
-                
-                with st.form("exam_reading"):
-                    for i, q in enumerate(reading_data.get("questions", [])):
-                        st.write(f"**{i+1}.** {q['question']}")
-                        st.session_state.exam_answers[f"r_{i}"] = st.radio(f"Option for Q{i+1}", q['options'], key=f"r_radio_{i}", label_visibility="collapsed")
-                        st.write("---")
-                    if st.form_submit_button("Next Section ➡️"):
-                        st.session_state.exam_step = 4
-                        st.rerun()
-
-            # --- ADIM 4: SPEAKING ---
-            elif st.session_state.exam_step == 4:
-                st.subheader("Part 4: Speaking Assessment")
-                st.progress(80)
-                
-                topic = data.get("SPEAKING_TOPIC", "Describe your day.")
-                if isinstance(topic, list): topic = topic[0]
-                
-                st.info(f"🎙️ **TOPIC:** {topic}")
-                st.warning("⚠️ Kural: En az 15 saniye konuşmalısınız.")
-                
-                audio = mic_recorder(start_prompt="🎤 Start Recording", stop_prompt="⏹️ Finish Exam")
-                
-                if audio:
-                    with st.spinner("Analyzing proficiency..."):
-                        bio = io.BytesIO(audio['bytes'])
-                        bio.name = "exam.webm"
-                        
-                        try:
-                            # Süre kontrolü
-                            transcription = client.audio.transcriptions.create(
-                                model="whisper-1", 
-                                file=bio, 
-                                language="en",
-                                response_format="verbose_json"
-                            )
-                            duration = transcription.duration
-                            
-                            if duration < 15:
-                                st.error(f"❌ Kayıt çok kısa ({duration:.1f} sn). Lütfen tekrar deneyin.")
-                            else:
-                                st.session_state.exam_answers["speaking_text"] = transcription.text
-                                
-                                # --- YENİ DEĞERLENDİRME MANTIĞI (PUAN YOK) ---
-                                prompt = f"""
-                                You are a professional English Examiner.
-                                Current Student Level: {user_data['current_level']}.
-
-                                EXAM DATA: {json.dumps(data)}
-                                USER ANSWERS: {json.dumps(st.session_state.exam_answers)}
-
-                                TASK: Evaluate the student based on Vocabulary, Grammar, Reading, and Speaking.
-                                Determine their exact proficiency level based on CEFR standards.
-                                DO NOT CALCULATE A SCORE OUT OF 100. JUST ASSESS THE LEVEL.
-
-                                OUTPUT JSON ONLY:
-                                {{
-                                    "assessed_level": "A2 High", // Values: [Level] Low, [Level] Mid, [Level] High, or [Next Level] Low
-                                    "feedback": "Detailed feedback in Turkish covering all 4 sections.",
-                                    "section_feedback": {{
-                                        "vocab": "Strong/Weak",
-                                        "grammar": "Strong/Weak",
-                                        "reading": "Strong/Weak",
-                                        "speaking": "Strong/Weak"
-                                    }}
-                                }}
-                                """
-                                res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user", "content":prompt}])
-                                result = strict_json_parse(res.choices[0].message.content)
-                                
-                                # Seviye güncelleme
-                                if result and "assessed_level" in result:
-                                    new_lvl_full = result["assessed_level"]
-                                    new_lvl_base = new_lvl_full.split()[0]
-                                    
-                                    # Eğer bir üst seviyeye geçtiyse (örn A2 -> B1)
-                                    if new_lvl_base != user_data["current_level"]:
-                                        user_data["current_level"] = new_lvl_base
-                                        save_data(user_data)
-                                        st.toast(f"🎉 LEVEL UP! New Level: {new_lvl_base}")
-                                
-                                st.session_state.exam_result = result
-                                st.session_state.exam_step = 5
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"Hata oluştu: {e}")
-
-            # --- ADIM 5: RESULT & ANSWER KEY ---
-            elif st.session_state.exam_step == 5:
-                res = st.session_state.exam_result or {}
-                st.balloons()
-                
-                lvl = res.get('assessed_level', 'Belirlenemedi')
-                st.markdown(f"<h1 style='text-align: center; color: #4F8BF9;'>🎓 Seviyeniz: {lvl}</h1>", unsafe_allow_html=True)
-                
-                st.info(f"**Genel Geri Bildirim:**\n{res.get('feedback', '')}")
-                
-                # Bölüm Bazlı Performans
-                sec = res.get("section_feedback", {})
-                cols = st.columns(4)
-                cols[0].metric("Vocab", sec.get("vocab", "-"))
-                cols[1].metric("Grammar", sec.get("grammar", "-"))
-                cols[2].metric("Reading", sec.get("reading", "-"))
-                cols[3].metric("Speaking", sec.get("speaking", "-"))
-
-                # --- CEVAP ANAHTARI ---
-                st.divider()
-                st.subheader("🔑 Answer Key")
-                
-                with st.expander("Vocabulary Answers"):
-                    for i, q in enumerate(data.get("VOCABULARY", [])[:15]):
-                        u_ans = st.session_state.exam_answers.get(f"v_{i}", "-")
-                        c_ans = q['answer']
-                        color = "green" if u_ans == c_ans else "red"
-                        st.markdown(f"**Q{i+1}:** {q['question']}")
-                        st.markdown(f"You: :{color}[{u_ans}] | Correct: :green[{c_ans}]")
-                        st.write("---")
-
-                with st.expander("Grammar Answers"):
-                    for i, q in enumerate(data.get("GRAMMAR", [])[:15]):
-                        u_ans = st.session_state.exam_answers.get(f"g_{i}", "-")
-                        c_ans = q['answer']
-                        is_corr = u_ans.strip().lower() == c_ans.strip().lower()
-                        color = "green" if is_corr else "red"
-                        st.markdown(f"**Q{i+1}:** {q['sentence']}")
-                        st.markdown(f"You: :{color}[{u_ans}] | Correct: :green[{c_ans}]")
-                        st.write("---")
-
-                with st.expander("Reading Answers"):
-                    reading_qs = data.get("READING", {}).get("questions", [])
-                    for i, q in enumerate(reading_qs):
-                        u_ans = st.session_state.exam_answers.get(f"r_{i}", "-")
-                        c_ans = q['answer']
-                        color = "green" if u_ans == c_ans else "red"
-                        st.markdown(f"**Q{i+1}:** {q['question']}")
-                        st.markdown(f"You: :{color}[{u_ans}] | Correct: :green[{c_ans}]")
-                        st.write("---")
-                
-                if st.button("Exit Exam"):
-                    st.session_state.exam_active = False
-                    st.session_state.exam_data = None
+        # 1. VOCAB
+        if st.session_state.exam_step == 1:
+            st.subheader("Part 1: Vocabulary")
+            st.progress(25)
+            with st.form("exam_v"):
+                for i, q in enumerate(data["VOCABULARY"][:15]):
+                    st.write(f"**{i+1}.** {q['question']}")
+                    st.session_state.exam_answers[f"v_{i}"] = st.radio(f"Opt {i}", q['options'], key=f"vr_{i}", label_visibility="collapsed")
+                    st.write("---")
+                if st.form_submit_button("Next ➡️"): 
+                    st.session_state.exam_step = 2
                     st.rerun()
 
-    # --- NORMAL MENÜLER ---
-    else:
-        page = st.sidebar.radio("📌 Menu", ["🎭 Scenario Coach", "👂 Listening Quiz", "🧠 Vocab Gym (Anki)", "📜 History & Stats"])
-
-        if page == "👂 Listening Quiz":
-            st.title("👂 Listening & Dictation")
-            if "quiz_text" not in st.session_state:
-                st.session_state.quiz_text = None
-                st.session_state.quiz_audio = None
-                st.session_state.quiz_checked = False
-
-            if st.button("🔊 New Audio"):
-                with st.spinner("Generating..."):
-                    prompt = f"Generate a B1 level sentence. Just the sentence."
-                    res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":prompt}])
-                    text = res.choices[0].message.content.strip().replace('"', '')
-                    st.session_state.quiz_text = text
-                    tts = gTTS(text=text, lang='en')
-                    fp = io.BytesIO()
-                    tts.write_to_fp(fp)
-                    st.session_state.quiz_audio = fp.getvalue()
-                    st.session_state.quiz_checked = False
+        # 2. GRAMMAR
+        elif st.session_state.exam_step == 2:
+            st.subheader("Part 2: Grammar")
+            st.progress(50)
+            with st.form("exam_g"):
+                for i, q in enumerate(data["GRAMMAR"][:15]):
+                    st.write(f"**{i+1}.** {q['sentence']}")
+                    st.session_state.exam_answers[f"g_{i}"] = st.text_input("Answer", key=f"gi_{i}", label_visibility="collapsed")
+                    st.write("---")
+                if st.form_submit_button("Next ➡️"): 
+                    st.session_state.exam_step = 3
                     st.rerun()
 
-            if st.session_state.quiz_audio:
-                st.audio(st.session_state.quiz_audio, format='audio/mp3')
-                user_input = st.text_input("Type what you hear:")
-                if st.button("Check"):
-                    st.session_state.quiz_checked = True
+        # 3. READING
+        elif st.session_state.exam_step == 3:
+            st.subheader("Part 3: Reading Comprehension")
+            st.progress(75)
+            r_data = data.get("READING", {})
+            st.info(r_data.get("text", "Text unavailable."))
+            with st.form("exam_r"):
+                for i, q in enumerate(r_data.get("questions", [])[:5]):
+                    st.write(f"**{i+1}.** {q['question']}")
+                    st.session_state.exam_answers[f"r_{i}"] = st.radio(f"Opt {i}", q['options'], key=f"rr_{i}", label_visibility="collapsed")
+                    st.write("---")
+                if st.form_submit_button("Next ➡️"): 
+                    st.session_state.exam_step = 4
+                    st.rerun()
 
-                if st.session_state.quiz_checked:
-                    clean_correct = re.sub(r'[^\w\s]', '', st.session_state.quiz_text).lower()
-                    clean_user = re.sub(r'[^\w\s]', '', user_input).lower()
-                    if clean_user == clean_correct:
-                        st.success("✅ Correct!")
-                    else:
-                        st.error(f"❌ Correct: {st.session_state.quiz_text}")
+        # 4. SPEAKING
+        elif st.session_state.exam_step == 4:
+            st.subheader("Part 4: Speaking")
+            st.progress(90)
+            topic = data.get("SPEAKING_TOPIC", "Describe your day.")
+            if isinstance(topic, list): topic = topic[0]
+            st.info(f"🎙️ **Topic:** {topic}")
+            st.warning("⚠️ Speak for at least 15 seconds.")
+            audio = mic_recorder(start_prompt="🎤 Record", stop_prompt="⏹️ Stop")
+            if audio:
+                with st.spinner("Analyzing..."):
+                    bio = io.BytesIO(audio['bytes']); bio.name = "ex.webm"
+                    try:
+                        res = client.audio.transcriptions.create(model="whisper-1", file=bio, response_format="verbose_json")
+                        if res.duration < 15:
+                            st.error(f"Too short ({res.duration:.1f}s). Try again.")
+                        else:
+                            st.session_state.exam_answers["speaking_text"] = res.text
+                            prompt = f"""
+                            Evaluate Proficiency. Level: {user_data['current_level']}.
+                            EXAM DATA: {json.dumps(data)}
+                            ANSWERS: {json.dumps(st.session_state.exam_answers)}
+                            OUTPUT JSON: {{ "level": "B1 High", "feedback": "TR feedback.", "breakdown": {{ "vocab": "Good", "grammar": "Fair", "reading": "Excellent", "speaking": "Good" }} }}
+                            """
+                            eval_res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":prompt}])
+                            st.session_state.exam_result = strict_json_parse(eval_res.choices[0].message.content)
+                            new_lvl = st.session_state.exam_result.get("level", "").split()[0]
+                            if new_lvl and new_lvl != user_data["current_level"]:
+                                user_data["current_level"] = new_lvl
+                                save_data(user_data)
+                                st.toast("Level Updated!")
+                            st.session_state.exam_step = 5
+                            st.rerun()
+                    except Exception as e: st.error(f"Error: {e}")
 
-        elif page == "🧠 Vocab Gym (Anki)":
-            st.title("🧠 Vocabulary Gym (Anki SM-2)")
+        # 5. RESULTS & ANSWERS
+        elif st.session_state.exam_step == 5:
+            res = st.session_state.exam_result
+            st.balloons()
+            st.markdown(f"<h1 style='text-align:center'>🎓 Level: {res.get('level')}</h1>", unsafe_allow_html=True)
+            st.info(res.get("feedback"))
+            br = res.get("breakdown", {})
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Vocab", br.get("vocab", "-"))
+            c2.metric("Grammar", br.get("grammar", "-"))
+            c3.metric("Reading", br.get("reading", "-"))
+            c4.metric("Speaking", br.get("speaking", "-"))
+            
+            st.divider()
+            st.subheader("🔑 Answer Key")
+            with st.expander("Show Answers"):
+                st.markdown("#### Vocabulary")
+                for i, q in enumerate(data.get("VOCABULARY", [])[:15]):
+                    u = st.session_state.exam_answers.get(f"v_{i}", "-")
+                    c = q['answer']
+                    st.markdown(f"**Q{i+1}:** {q['question']}\nYou: {u} | Correct: **{c}** {'✅' if u==c else '❌'}\n---")
+                st.markdown("#### Grammar")
+                for i, q in enumerate(data.get("GRAMMAR", [])[:15]):
+                    u = st.session_state.exam_answers.get(f"g_{i}", "-")
+                    c = q['answer']
+                    st.markdown(f"**Q{i+1}:** {q['sentence']}\nYou: {u} | Correct: **{c}**\n---")
+                st.markdown("#### Reading")
+                for i, q in enumerate(data.get("READING", {}).get("questions", [])[:5]):
+                    u = st.session_state.exam_answers.get(f"r_{i}", "-")
+                    c = q['answer']
+                    st.markdown(f"**Q{i+1}:** {q['question']}\nYou: {u} | Correct: **{c}** {'✅' if u==c else '❌'}\n---")
 
-            if st.button("🚪 Quit / Reset", type="secondary", key="vocab_exit"):
-                st.session_state.srs_active_card = None
-                st.session_state.srs_revealed = False
-                st.session_state.srs_audio = None
+            if st.button("Exit Exam"):
+                st.session_state.exam_active = False
                 st.rerun()
 
-            if "srs_active_card" not in st.session_state:
-                st.session_state.srs_active_card = None
-                st.session_state.srs_revealed = False
-                st.session_state.srs_audio = None
-            if "gym_session_seen" not in st.session_state:
-                st.session_state.gym_session_seen = set()
-
-            if st.session_state.srs_active_card is None:
-                card_data, card_type = get_next_srs_card(user_data, st.session_state.gym_session_seen)
-                if card_data:
-                    if card_type == "new":
-                        with st.spinner(f"Yeni kelime hazırlanıyor: {card_data['word']}..."):
-                            word_choice = card_data['word']
-                            prompt = f"""
-                            Define the English word: "{word_choice}".
-                            TARGET LEVEL: {user_data['current_level']}.
-                            OUTPUT JSON ONLY:
-                            {{
-                                "word": "{word_choice}",
-                                "tr": "TURKISH TRANSLATION HERE (MUST BE TURKISH)",
-                                "ex": "Short English example sentence"
-                            }}
-                            """
-                            try:
-                                res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":prompt}])
-                                full_card = strict_json_parse(res.choices[0].message.content)
-                                st.session_state.srs_active_card = full_card
-                                st.session_state.srs_is_new = True
-                                st.toast("✨ Yeni Kelime!")
-                            except:
-                                st.error("Bağlantı hatası.")
-                    else:
-                        st.session_state.srs_active_card = card_data
-                        st.session_state.srs_is_new = False
-                        st.toast("↺ Tekrar Zamanı!")
-                    
-                    if st.session_state.srs_active_card:
-                        st.session_state.gym_session_seen.add(st.session_state.srs_active_card["word"])
-                        word = st.session_state.srs_active_card.get("word", "")
-                        tts = gTTS(text=word, lang='en')
-                        fp = io.BytesIO()
-                        tts.write_to_fp(fp)
-                        st.session_state.srs_audio = fp.getvalue()
-                else:
-                    st.info("🎉 Tebrikler! Şimdilik çalışılacak kelime kalmadı.")
-
-            if st.session_state.srs_active_card:
-                card = st.session_state.srs_active_card
-                st.markdown(f"""
-                    <div style="border: 2px solid #4F8BF9; border-radius: 10px; padding: 20px; text-align: center; margin-bottom: 20px;">
-                        <h1 style='color:#4F8BF9; font-size: 50px; margin:0;'>{card['word']}</h1>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                if st.session_state.srs_audio:
-                    st.audio(st.session_state.srs_audio, format='audio/mp3', autoplay=True)
-
-                if not st.session_state.srs_revealed:
-                    if st.button("👀 Show Answer", use_container_width=True):
-                        st.session_state.srs_revealed = True
-                        st.rerun()
-                else:
-                    st.success(f"🇹🇷 {card.get('tr', 'No Data')}")
-                    st.info(f"🇬🇧 {card.get('ex', 'No Data')}")
-                    
-                    if not st.session_state.srs_is_new:
-                        ef = card.get('ease_factor', 2.5)
-                        inter = card.get('interval', 0)
-                        st.caption(f"📊 Stats: Ease: {ef:.2f} | Interval: {inter} days")
-
-                    st.markdown("### 🎛️ Rate Difficulty:")
-                    c1, c2, c3, c4 = st.columns(4)
-                    
-                    with c1:
-                        if st.button("🟥 Again (0)", use_container_width=True):
-                            update_srs_card_sm2(user_data, card, quality=0)
-                            st.session_state.srs_active_card = None
-                            st.session_state.srs_revealed = False
-                            st.rerun()
-                    with c2:
-                        if st.button("🟧 Hard (3)", use_container_width=True):
-                            update_srs_card_sm2(user_data, card, quality=3)
-                            st.session_state.srs_active_card = None
-                            st.session_state.srs_revealed = False
-                            st.rerun()
-                    with c3:
-                        if st.button("🟩 Good (4)", use_container_width=True):
-                            update_srs_card_sm2(user_data, card, quality=4)
-                            st.session_state.srs_active_card = None
-                            st.session_state.srs_revealed = False
-                            st.rerun()
-                    with c4:
-                        if st.button("🟦 Easy (5)", use_container_width=True):
-                            update_srs_card_sm2(user_data, card, quality=5)
-                            st.session_state.srs_active_card = None
-                            st.session_state.srs_revealed = False
-                            st.rerun()
-
-        elif page == "📜 History & Stats":
-            st.title("📜 Progress Log")
-            st.subheader("📅 Daily Vocabulary Growth")
+    # --- NORMAL SAYFALAR ---
+    else:
+        page = st.sidebar.radio("📌 Menu", ["🎭 Scenario Coach", "👂 Listening Quiz", "🧠 Vocab Gym (Anki)", "📜 History"])
+        
+        if page == "🎭 Scenario Coach":
+            st.title("🗣️ AI Roleplay")
             
-            hist_data = user_data.get("lesson_history", [])
-            vocab_log = {}
-            for h in hist_data:
-                date_str = h.get("date", "Unknown")
-                word_count = len(h.get("words", []))
-                if date_str in vocab_log:
-                    vocab_log[date_str] += word_count
-                else:
-                    vocab_log[date_str] = word_count
-            
-            if vocab_log:
-                df_log = pd.DataFrame(list(vocab_log.items()), columns=["Date", "New Words Studied"])
-                df_log = df_log.sort_values("Date", ascending=False)
-                st.dataframe(df_log, use_container_width=True)
-            else:
-                st.info("Henüz veri yok.")
-
-            st.divider()
-            st.subheader("📚 Lesson History")
-            if not hist_data: st.info("No history.")
-            for h in reversed(hist_data):
-                with st.expander(f"📚 {h.get('date')} - {h.get('topic')}"):
-                    st.write(f"**Score:** {h.get('score')}")
-                    br = h.get("breakdown", {})
-                    st.caption(f"Grammar: {br.get('grammar','-')} | Vocab: {br.get('vocabulary','-')} | Fluency: {br.get('fluency','-')}")
-                    st.success(f"**Artılar:** {', '.join(h.get('feedback_pros', []))}")
-                    st.error(f"**Eksiler:** {', '.join(h.get('feedback_cons', []))}")
-
-        elif page == "🎭 Scenario Coach":
-            st.title("🗣️ AI Roleplay Coach")
-
             if st.session_state.get("lesson_active", False) and not st.session_state.get("reading_phase", False):
-                c_top1, c_top2 = st.columns([4, 1])
-                with c_top1:
-                    st.info(f"🎙️ Speaking Phase | Target: {int(st.session_state.target_speaking_seconds // 60)} mins")
-                with c_top2:
-                    if st.button("🚪 Quit / Reset", type="primary", use_container_width=True):
+                c1, c2 = st.columns([4,1])
+                with c1: st.info(f"🎙️ Speaking | Target: {int(st.session_state.target_speaking_seconds//60)}m")
+                with c2: 
+                    if st.button("🚪 Quit"):
                         st.session_state.lesson_active = False
-                        st.session_state.messages = []
-                        st.session_state.reading_phase = False
-                        st.session_state.scenario = None
+                        st.rerun()
+                
+                # Chat UI
+                for m in st.session_state.get("display_messages", []):
+                    if m["role"]=="info": st.info(m["content"])
+                    elif m["role"]=="user": 
+                        with st.chat_message("user"): st.write(m["content"])
+                        if "correction" in m: st.warning(f"Correction: {m['correction']}")
+                    elif m["role"]=="assistant":
+                        with st.chat_message("assistant"):
+                            st.write(m["content"])
+                            with st.expander("TR"): st.info(m.get("tr_content",""))
+                
+                # iPhone Uyumlu Audio
+                if st.session_state.get("last_audio_response"):
+                    # Sadece son mesajın sesi tekrar etmesin diye kontrol
+                    if st.session_state.get("played_audio_id") != len(st.session_state.messages):
+                        autoplay_audio(st.session_state.last_audio_response)
+                        st.session_state.played_audio_id = len(st.session_state.messages)
+
+                audio = mic_recorder(start_prompt="🎤", stop_prompt="⏹️")
+                if audio:
+                    bio = io.BytesIO(audio['bytes']); bio.name = "audio.webm"
+                    try:
+                        trans = client.audio.transcriptions.create(model="whisper-1", file=bio, response_format="verbose_json")
+                        txt = trans.text
+                        st.session_state.accumulated_speaking_time += trans.duration
+                        
+                        last_q = st.session_state.messages[-1]["content"] if st.session_state.messages else ""
+                        check_p = f"User said: '{txt}' to '{last_q}'. Fix grammar. If past tense required by question, force it. Return 'Correction: ...' or 'OK'."
+                        corr_res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":check_p}])
+                        corr = corr_res.choices[0].message.content if "Correction:" in corr_res.choices[0].message.content else None
+                        
+                        st.session_state.messages.append({"role":"user", "content":txt})
+                        disp = {"role":"user", "content":txt}
+                        if corr: disp["correction"] = corr.replace("Correction:", "").strip()
+                        st.session_state.display_messages.append(disp)
+                        
+                        rep_res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
+                        reply = rep_res.choices[0].message.content
+                        tr_reply = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":f"Translate: {reply}"}]).choices[0].message.content
+                        
+                        st.session_state.messages.append({"role":"assistant", "content":reply})
+                        st.session_state.display_messages.append({"role":"assistant", "content":reply, "tr_content":tr_reply})
+                        
+                        tts = gTTS(text=reply, lang='en')
+                        fp = io.BytesIO(); tts.write_to_fp(fp)
+                        st.session_state.last_audio_response = fp.getvalue()
+                        st.rerun()
+                    except: st.error("Error processing audio")
+
+                curr = st.session_state.accumulated_speaking_time
+                targ = st.session_state.target_speaking_seconds
+                st.progress(min(curr/targ, 1.0) if targ>0 else 0)
+                if curr >= targ:
+                    if st.button("➡️ Go to Reading"):
+                        st.session_state.reading_phase = True
+                        prompt = f"Create a reading text (150 words) about {st.session_state.scenario} and 3 questions. JSON."
+                        res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":prompt}])
+                        st.session_state.reading_content = strict_json_parse(res.choices[0].message.content)
                         st.rerun()
 
-                with st.sidebar:
-                    curr = st.session_state.accumulated_speaking_time
-                    targ = st.session_state.target_speaking_seconds
-                    prog = min(curr / targ, 1.0) if targ > 0 else 0
-                    st.progress(prog, text=f"Time: {int(curr)}s / {int(targ)}s")
-
-            if not st.session_state.get("lesson_active", False):
-                if "temp_scenario" not in st.session_state or st.session_state.temp_scenario is None:
-                    if user_data.get("next_lesson_prep"):
-                        st.session_state.temp_scenario = user_data["next_lesson_prep"].get("scenario")
-                    else:
-                        completed_scenarios = [h.get("topic") for h in user_data.get("lesson_history", [])]
-                        available_scenarios = [s for s in SCENARIO_POOL if s not in completed_scenarios]
-                        if not available_scenarios: available_scenarios = SCENARIO_POOL
-                        st.session_state.temp_scenario = random.choice(available_scenarios)
-                
-                st.markdown(f"""
-                <div style="padding:15px; background-color:#f0f2f6; border-radius:10px; margin-bottom:20px;">
-                    <h3>🎯 Next Mission: {st.session_state.temp_scenario}</h3>
-                    <p>Start chatting! First, tell me about your day (in English), then we'll dive into the scenario.</p>
-                </div>
-                """, unsafe_allow_html=True)
-
-                if st.button("🔀 Change Scenario"):
-                    st.session_state.temp_scenario = random.choice(SCENARIO_POOL)
+            elif not st.session_state.get("lesson_active", False):
+                if st.button("🚀 Start New Scenario"):
+                    start_lesson_logic(client, user_data['current_level'], "LESSON", 1.0)
                     st.rerun()
-
-                mins = st.slider("Duration (Mins)", 0.5, 30.0, 1.0, step=0.5)
-                
-                if st.button("🚀 START SCENARIO"):
-                    forced = st.session_state.temp_scenario
-                    start_lesson_logic(client, user_data["current_level"], "LESSON", mins, forced_scenario=forced)
-                    st.session_state.temp_scenario = None 
-                    st.rerun()
+            
             else:
-                if not st.session_state.get("reading_phase", False):
-                    chat_cont = st.container()
-                    with chat_cont:
-                        disp_msgs = st.session_state.get("display_messages", [])
-                        for i, msg in enumerate(disp_msgs):
-                            if msg["role"] == "info":
-                                st.info(msg["content"])
-                            elif msg["role"] == "user":
-                                if "correction" in msg:
-                                    with st.expander("🛠️ Grammar Correction", expanded=True):
-                                        st.markdown(f"**Doğrusu:** :green[{msg['correction']}]")
-                                with st.chat_message("user", avatar="👤"):
-                                    st.write(msg["content"])
-                            elif msg["role"] == "assistant":
-                                is_last = (i == len(disp_msgs) - 1)
-                                if is_last:
-                                    with st.chat_message("assistant", avatar="🤖"):
-                                        st.write("🔊 **Listening...**")
-                                        with st.expander("🇬🇧 Text"):
-                                            content = msg["content"]
-                                            for w in st.session_state.target_vocab:
-                                                content = re.sub(f"(?i)\\b{re.escape(w)}\\b", f"**:{'blue'}[{w.upper()}]**", content)
-                                            st.markdown(content)
-                                        with st.expander("🇹🇷 Türkçesi"):
-                                            st.info(msg.get("tr_content", "..."))
-                                else:
-                                    with st.chat_message("assistant", avatar="🤖"):
-                                        st.write(msg["content"])
-
-                    if "last_audio_response" in st.session_state and st.session_state.last_audio_response:
-                        st.audio(st.session_state.last_audio_response, format="audio/mp3", autoplay=True)
-
-                    st.write("---")
-                    c1, c2 = st.columns([1,4])
-                    with c1: audio = mic_recorder(start_prompt="🎤", stop_prompt="⏹️")
-                    with c2:
-                        curr = st.session_state.accumulated_speaking_time
-                        targ = st.session_state.target_speaking_seconds
-                        time_up = (curr >= targ)
-                        btn_text = "➡️ UNLOCK READING" if not time_up else "➡️ GO TO READING PHASE"
-                        
-                        if st.button(btn_text, use_container_width=True, disabled=not time_up):
-                            st.session_state.reading_phase = True
-                            with st.spinner("Generating reading task..."):
-                                prompt = f"""
-                                Create a short reading text (approx 150 words) specifically about this scenario: {st.session_state.scenario}. 
-                                CRITICAL RULES:
-                                1. The text MUST be consistent (e.g., if user complained about cold food, the text discusses cold food).
-                                2. Generate 3 multiple-choice or open-ended questions based strictly on THIS text.
-                                3. Do not ask questions about facts not present in the text.
-                                
-                                JSON Format: {{'text':'...','questions':['Q1','Q2','Q3']}}
-                                """
-                                try:
-                                    res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":prompt}])
-                                    st.session_state.reading_content = strict_json_parse(res.choices[0].message.content)
-                                    if not st.session_state.reading_content: raise Exception("Empty JSON")
-                                except:
-                                    st.session_state.reading_content = {"text": "Error loading text.", "questions": ["Q1", "Q2", "Q3"]}
-                            st.rerun()
-
-                    if audio:
-                        if "last_bytes" not in st.session_state or audio['bytes'] != st.session_state.last_bytes:
-                            st.session_state.last_bytes = audio['bytes']
-                            if len(audio['bytes']) < 500:
-                                st.warning("Audio unclear.")
-                            else:
-                                with st.spinner("Processing..."):
-                                    try:
-                                        bio = io.BytesIO(audio['bytes'])
-                                        bio.name = "audio.webm"
-                                        
-                                        transcription = client.audio.transcriptions.create(
-                                            model="whisper-1", 
-                                            file=bio, 
-                                            language="en", 
-                                            temperature=0.2,
-                                            response_format="verbose_json", 
-                                            prompt=f"User speaking about scenario {st.session_state.scenario}."
-                                        )
-                                        txt = transcription.text
-                                        st.session_state.accumulated_speaking_time += transcription.duration
-
-                                        txt_l = (txt or "").lower()
-                                        bad = any(p.search(txt_l) for p in _BANNED_PATTERNS)
-
-                                        if bad or len(txt.strip()) < 2:
-                                            st.warning("Audio unclear.")
-                                        else:
-                                            last_question = "Unknown context"
-                                            for m in reversed(st.session_state.messages):
-                                                if m["role"] == "assistant":
-                                                    last_question = m["content"]
-                                                    break
-                                            
-                                            corr = None
-                                            try:
-                                                p_check = f"""
-                                                The user is answering this question: "{last_question}"
-                                                The User said: '{txt}'
-                                                TASK: Check grammar and logic.
-                                                CRITICAL RULE FOR TENSES:
-                                                - Analyze the QUESTION to determine the required tense.
-                                                - If the question asks about the PAST (e.g., "What did you do?"), you MUST correct the user's sentence to PAST TENSE (e.g., "wake" -> "woke").
-                                                - If the question is about routine/present, keep present tense.
-                                                OTHER RULES:
-                                                - IGNORE missing articles (a, an, the).
-                                                - IGNORE capitalization.
-                                                OUTPUT FORMAT:
-                                                - If there is a tense mismatch with the question or a major error: return 'Correction: [Corrected Sentence]'.
-                                                - If it is grammatically acceptable: return 'OK'.
-                                                """
-                                                c_res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":p_check}])
-                                                ans = c_res.choices[0].message.content
-                                                if "Correction:" in ans:
-                                                    corr = ans.replace("Correction:", "").strip()
-                                            except: pass
-
-                                            u_msg = {"role": "user", "content": txt}
-                                            st.session_state.messages.append(u_msg)
-
-                                            disp_u_msg = {"role": "user", "content": txt}
-                                            if corr: disp_u_msg["correction"] = corr
-                                            st.session_state.display_messages.append(disp_u_msg)
-
-                                            res = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages)
-                                            rep = res.choices[0].message.content
-                                            tr_rep = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user", "content":f"Translate to Turkish: {rep}"}]).choices[0].message.content
-
-                                            st.session_state.messages.append({"role": "assistant", "content": rep})
-                                            st.session_state.display_messages.append({"role": "assistant", "content": rep, "tr_content": tr_rep})
-
-                                            tts = gTTS(text=rep, lang='en')
-                                            fp = io.BytesIO()
-                                            tts.write_to_fp(fp)
-                                            st.session_state.last_audio_response = fp.getvalue()
-                                            st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Audio Error: {e}")
-
-                else:
-                    st.markdown("### 📖 Reading")
-                    if st.button("🚪 Quit / Reset", type="primary"):
+                st.markdown("### 📖 Reading Task")
+                if st.button("🚪 Quit"): 
+                    st.session_state.lesson_active = False; st.rerun()
+                content = st.session_state.get("reading_content", {})
+                st.info(content.get("text", ""))
+                with st.form("read_lesson"):
+                    ans = []
+                    for i, q in enumerate(content.get("questions", [])):
+                        ans.append(st.text_input(f"{q}"))
+                    if st.form_submit_button("Finish"):
+                        user_data["lessons_completed"] += 1
+                        save_data(user_data)
                         st.session_state.lesson_active = False
-                        st.session_state.reading_phase = False
-                        st.session_state.reading_completed = False
-                        st.session_state.messages = []
+                        st.success("Lesson Completed!")
                         st.rerun()
-                        
-                    if not st.session_state.get("reading_completed", False):
-                        content = st.session_state.get("reading_content", {})
-                        st.info(content.get("text", ""))
 
-                        with st.form("read_form"):
-                            ans_list = []
-                            questions = content.get("questions", ["Q1", "Q2", "Q3"])
-                            for i, q in enumerate(questions):
-                                ans_list.append(st.text_input(f"{i+1}. {q}"))
-                            submitted = st.form_submit_button("🏁 FINISH & GRADE")
+        elif page == "👂 Listening Quiz":
+            st.title("👂 Listening")
+            if st.button("🔊 New Audio"):
+                prompt = "Generate a B1 sentence."
+                res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":prompt}])
+                text = res.choices[0].message.content.replace('"','')
+                st.session_state.quiz_text = text
+                tts = gTTS(text=text, lang='en')
+                fp = io.BytesIO(); tts.write_to_fp(fp)
+                st.session_state.quiz_audio = fp.getvalue()
+                st.session_state.quiz_checked = False
+                st.rerun()
+            
+            if st.session_state.get("quiz_audio"):
+                autoplay_audio(st.session_state.quiz_audio) # <--- FIX
+                user_input = st.text_input("Type what you hear:")
+                if st.button("Check"):
+                    clean_c = re.sub(r'[^\w\s]', '', st.session_state.quiz_text).lower()
+                    clean_u = re.sub(r'[^\w\s]', '', user_input).lower()
+                    if clean_u == clean_c: st.success("Correct!")
+                    else: st.error(f"Wrong. Correct: {st.session_state.quiz_text}")
 
-                        if submitted:
-                            with st.spinner("Detaylı Performans Analizi Yapılıyor (CEFR Standartları)..."):
-                                r_text = st.session_state.reading_content.get("text", "")
-                                r_qs = st.session_state.reading_content.get("questions", [])
-                                target_words = st.session_state.target_vocab
-                                
-                                user_answers_with_context = []
-                                for i, ans in enumerate(ans_list):
-                                    q_text = r_qs[i] if i < len(r_qs) else f"Question {i+1}"
-                                    user_answers_with_context.append({
-                                        "question": q_text,
-                                        "user_answer": ans
-                                    })
-
-                                prompt = f"""
-                                ACT AS A STRICT IELTS/CEFR EXAMINER. 
-                                Analyze the User's performance based on the CHAT HISTORY and READING TASK.
-
-                                --- DATA ---
-                                TARGET VOCABULARY: {json.dumps(target_words)}
-                                READING TEXT: "{r_text}"
-                                READING ANSWERS: {json.dumps(user_answers_with_context)}
-                                ------------
-
-                                SCORING RUBRIC (Total 100 Points):
-                                1. GRAMMAR & ACCURACY (0-20 pts): Correct verb tenses, prepositions, sentence structure.
-                                2. VOCABULARY RANGE (0-20 pts): Variety of words AND usage of 'TARGET VOCABULARY'.
-                                3. FLUENCY & RELEVANCE (0-20 pts): Did the user answer relevantly? Were sentences complete?
-                                4. TASK ACHIEVEMENT (0-20 pts): Did they successfully complete the roleplay scenario goal?
-                                5. READING COMPREHENSION (0-20 pts): Are the answers to reading questions correct based on the text?
-
-                                OUTPUT JSON FORMAT (Strict):
-                                {{
-                                    "scores": {{
-                                        "grammar": 0,
-                                        "vocabulary": 0,
-                                        "fluency": 0,
-                                        "task_achievement": 0,
-                                        "reading": 0,
-                                        "total_score": 0
-                                    }},
-                                    "used_target_words": ["word1", "word2"],
-                                    "reading_feedback": [
-                                        {{
-                                            "question": "...",
-                                            "user_answer": "...",
-                                            "correct_answer": "...",
-                                            "is_correct": true
-                                        }}
-                                    ],
-                                    "detailed_feedback": {{
-                                        "grammar_review": "Turkish comment on grammar mistakes",
-                                        "vocabulary_tips": "Turkish comment on better word choices",
-                                        "general_pros": ["Tr Pro 1", "Tr Pro 2"],
-                                        "general_cons": ["Tr Con 1", "Tr Con 2"]
-                                    }},
-                                    "next_lesson_homework": {{"scenario": "...", "vocab": ["..."]}}
-                                }}
-                                IMPORTANT: Provide 'pros' and 'cons' comments in TURKISH.
-                                """
-                                
-                                msgs = st.session_state.messages + [{"role":"system","content":prompt}]
-
-                                try:
-                                    res = client.chat.completions.create(model="gpt-4o", messages=msgs)
-                                    rep = strict_json_parse(res.choices[0].message.content)
-                                    if not rep or "scores" not in rep:
-                                        rep = {
-                                            "scores": {"total_score": 0, "grammar": 0, "vocabulary": 0, "fluency": 0, "task_achievement": 0, "reading": 0},
-                                            "detailed_feedback": {"general_pros": ["Hata oluştu"], "general_cons": ["Lütfen tekrar deneyin"]},
-                                            "reading_feedback": []
-                                        }
-
-                                    user_data["lessons_completed"] += 1
-                                    if "next_lesson_homework" in rep: 
-                                        user_data["next_lesson_prep"] = rep["next_lesson_homework"]
-                                    
-                                    hist = {
-                                        "date": datetime.now().strftime("%Y-%m-%d"),
-                                        "topic": st.session_state.scenario,
-                                        "score": rep["scores"]["total_score"],
-                                        "breakdown": rep["scores"],
-                                        "words": st.session_state.target_vocab,
-                                        "feedback_pros": rep["detailed_feedback"].get("general_pros", []),
-                                        "feedback_cons": rep["detailed_feedback"].get("general_cons", [])
-                                    }
-                                    user_data["lesson_history"].append(hist)
-                                    save_data(user_data)
-
-                                    st.session_state.final_report = rep
-                                    st.session_state.reading_completed = True
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Analysis Error: {e}")
-
+        elif page == "🧠 Vocab Gym (Anki)":
+            st.title("🧠 Vocab Gym")
+            if st.button("🚪 Quit"): st.session_state.srs_active_card = None; st.rerun()
+            if not st.session_state.get("srs_active_card"):
+                card, type_ = get_next_srs_card(user_data, set())
+                if card:
+                    if type_ == "new":
+                        p = f"Define '{card['word']}' (Level {user_data['current_level']}). JSON: {{'word':'{card['word']}', 'tr':'...', 'ex':'...'}}"
+                        res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":p}])
+                        st.session_state.srs_active_card = strict_json_parse(res.choices[0].message.content)
+                        st.session_state.srs_is_new = True
                     else:
-                        rep = st.session_state.final_report
-                        st.balloons()
-                        
-                        total = rep["scores"]["total_score"]
-                        st.markdown(f"<h1 style='text-align: center; color: #4F8BF9;'>🏆 Score: {total} / 100</h1>", unsafe_allow_html=True)
+                        st.session_state.srs_active_card = card
+                        st.session_state.srs_is_new = False
+                    tts = gTTS(text=st.session_state.srs_active_card['word'], lang='en')
+                    fp = io.BytesIO(); tts.write_to_fp(fp)
+                    st.session_state.srs_audio = fp.getvalue()
+                else: st.info("No words due.")
 
-                        cols = st.columns(5)
-                        cols[0].metric("Grammar", rep["scores"]["grammar"])
-                        cols[1].metric("Vocab", rep["scores"]["vocabulary"])
-                        cols[2].metric("Fluency", rep["scores"]["fluency"])
-                        cols[3].metric("Task", rep["scores"]["task_achievement"])
-                        cols[4].metric("Reading", rep["scores"]["reading"])
+            if st.session_state.get("srs_active_card"):
+                c = st.session_state.srs_active_card
+                st.markdown(f"## {c['word']}")
+                if st.session_state.get("srs_audio"): 
+                    autoplay_audio(st.session_state.srs_audio) # <--- FIX
+                
+                if st.button("Show Answer"): st.session_state.srs_revealed = True; st.rerun()
+                if st.session_state.get("srs_revealed"):
+                    st.success(c.get("tr")); st.info(c.get("ex"))
+                    c1,c2,c3,c4 = st.columns(4)
+                    if c1.button("Again"): update_srs_card_sm2(user_data, c, 0); st.session_state.srs_active_card=None; st.session_state.srs_revealed=False; st.rerun()
+                    if c2.button("Hard"): update_srs_card_sm2(user_data, c, 3); st.session_state.srs_active_card=None; st.session_state.srs_revealed=False; st.rerun()
+                    if c3.button("Good"): update_srs_card_sm2(user_data, c, 4); st.session_state.srs_active_card=None; st.session_state.srs_revealed=False; st.rerun()
+                    if c4.button("Easy"): update_srs_card_sm2(user_data, c, 5); st.session_state.srs_active_card=None; st.session_state.srs_revealed=False; st.rerun()
 
-                        st.divider()
-
-                        used_words = rep.get("used_target_words", [])
-                        all_targets = st.session_state.target_vocab
-                        st.write("### 🎯 Target Words Check")
-                        
-                        if all_targets:
-                            word_cols = st.columns(len(all_targets))
-                            for i, word in enumerate(all_targets):
-                                if word in used_words:
-                                    word_cols[i].success(f"✅ {word}")
-                                else:
-                                    word_cols[i].error(f"❌ {word}")
-
-                        st.divider()
-
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            st.subheader("👍 İyi Yönler")
-                            for item in rep["detailed_feedback"].get("general_pros", []):
-                                st.success(f"• {item}")
-                            
-                            st.info(f"**💡 Vocab Tips:** {rep['detailed_feedback'].get('vocabulary_tips', '')}")
-
-                        with c2:
-                            st.subheader("👎 Gelişmeli")
-                            for item in rep["detailed_feedback"].get("general_cons", []):
-                                st.error(f"• {item}")
-
-                            st.warning(f"**🛠️ Grammar:** {rep['detailed_feedback'].get('grammar_review', '')}")
-
-                        st.write("---")
-                        with st.expander("📖 Reading Quiz Details"):
-                            for fb in rep.get("reading_feedback", []):
-                                color = "green" if fb["is_correct"] else "red"
-                                st.markdown(f"**Soru:** {fb['question']}")
-                                st.write(f"Siz: {fb['user_answer']}")
-                                st.markdown(f":{color}[Doğru Cevap: {fb['correct_answer']}]")
-                                st.divider()
-                        
-                        with st.expander("🔧 Debug: Raw Analysis Data"):
-                            st.json(rep)
-
-                        if st.button("🚀 START NEXT LESSON (Hard Reset)", type="primary", use_container_width=True):
-                            st.session_state.lesson_active = False
-                            st.session_state.messages = []
-                            st.session_state.display_messages = []
-                            st.session_state.reading_phase = False
-                            st.session_state.reading_completed = False
-                            st.session_state.final_report = None
-                            st.session_state.accumulated_speaking_time = 0.0
-                            st.session_state.scenario = None
-                            st.session_state.temp_scenario = None
-                            st.rerun()
+        elif page == "📜 History":
+            st.title("📜 History")
+            for h in reversed(user_data.get("lesson_history", [])):
+                st.write(f"{h.get('date')} - {h.get('topic')}")
 else:
     st.warning("Enter API Key")
