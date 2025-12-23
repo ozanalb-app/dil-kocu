@@ -1,4 +1,5 @@
-import streamlit as st
+t9oıyuolpkjgggggppt-0,
++4import streamlit as st
 from openai import OpenAI
 from streamlit_mic_recorder import mic_recorder
 from gtts import gTTS
@@ -92,6 +93,25 @@ SCENARIO_POOL = [
 ]
 
 # --- 3. YARDIMCI FONKSİYONLAR ---
+def _ios_safe_audio_name(audio_dict, fallback="audio.m4a"):
+    """
+    iPhone/Safari'de MediaRecorder çoğu zaman webm yerine mp4/m4a üretür.
+    Whisper doğru dosya tipini daha iyi anlayabilsin diye bio.name'i mime'a göre ayarlarız.
+    """
+    mt = (audio_dict or {}).get("mime_type") or (audio_dict or {}).get("type") or ""
+    mt = mt.lower()
+
+    if "mp4" in mt:
+        return "audio.mp4"
+    if "m4a" in mt or "aac" in mt:
+        return "audio.m4a"
+    if "wav" in mt:
+        return "audio.wav"
+    if "webm" in mt:
+        return "audio.webm"
+
+    return fallback
+
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {
@@ -475,7 +495,7 @@ if api_key:
                 if audio:
                     with st.spinner("Analyzing proficiency..."):
                         bio = io.BytesIO(audio['bytes'])
-                        bio.name = "exam.webm"
+                        bio.name = _ios_safe_audio_name(audio, fallback="exam.m4a").replace("audio.", "exam.")
                         
                         try:
                             # Süre kontrolü
@@ -694,7 +714,7 @@ if api_key:
                     """, unsafe_allow_html=True)
                 
                 if st.session_state.srs_audio:
-                    st.audio(st.session_state.srs_audio, format='audio/mp3', autoplay=True)
+                    st.audio(st.session_state.srs_audio, format="audio/mpeg")
 
                 if not st.session_state.srs_revealed:
                     if st.button("👀 Show Answer", use_container_width=True):
@@ -849,7 +869,7 @@ if api_key:
                                         st.write(msg["content"])
 
                     if "last_audio_response" in st.session_state and st.session_state.last_audio_response:
-                        st.audio(st.session_state.last_audio_response, format="audio/mp3", autoplay=True)
+                        st.audio(st.session_state.last_audio_response, format="audio/mpeg")
 
                     st.write("---")
                     c1, c2 = st.columns([1,4])
@@ -1144,4 +1164,5 @@ if api_key:
                             st.rerun()
 else:
     st.warning("Enter API Key")
+
 
