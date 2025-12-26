@@ -689,112 +689,185 @@ if api_key:
                     else:
                         st.error(f"❌ Correct: {st.session_state.quiz_text}")
 
-        elif page == "🧠 Vocab Gym (Anki)":
-            st.title("🧠 Vocabulary Gym (Anki SM-2)")
+elif page == "🧠 Vocab Gym (Anki)":
+    st.title("🧠 Vocabulary Gym (Anki SM-2)")
 
-            if st.button("🚪 Quit / Reset", type="secondary", key="vocab_exit"):
-                st.session_state.srs_active_card = None
-                st.session_state.srs_revealed = False
-                st.session_state.srs_audio = None
-                st.rerun()
+    # --- FIX: Yeni kart üretildiği anda SRS'e kaydet (puan verilmeden kaybolmasın) ---
+    def ensure_card_in_srs(data, card_obj):
+        """
+        NEW kart üretildiği anda SRS listesine ekler.
+        Böylece kullanıcı Quit/Reset yaparsa kelime kaybolmaz.
+        (Henüz SM-2 puanı verilmedi; next_review_ts=now ile 'due' kalır.)
+        """
+        if not card_obj or "word" not in card_obj:
+            return
 
-            if "srs_active_card" not in st.session_state:
-                st.session_state.srs_active_card = None
-                st.session_state.srs_revealed = False
-                st.session_state.srs_audio = None
-            if "gym_session_seen" not in st.session_state:
-                st.session_state.gym_session_seen = set()
+        srs_list = data.get("vocab_srs", [])
+        word = card_obj["word"]
 
-            if st.session_state.srs_active_card is None:
-                card_data, card_type = get_next_srs_card(user_data, st.session_state.gym_session_seen)
-                if card_data:
-                    if card_type == "new":
-                        with st.spinner(f"Yeni kelime hazırlanıyor: {card_data['word']}..."):
-                            word_choice = card_data['word']
-                            prompt = f"""
-                            Define the English word: "{word_choice}".
-                            TARGET LEVEL: {user_data['current_level']}.
-                            OUTPUT JSON ONLY:
-                            {{
-                                "word": "{word_choice}",
-                                "tr": "TURKISH TRANSLATION HERE (MUST BE TURKISH)",
-                                "ex": "Short English example sentence"
-                            }}
-                            """
-                            try:
-                                res = client.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":prompt}])
-                                full_card = strict_json_parse(res.choices[0].message.content)
-                                st.session_state.srs_active_card = full_card
-                                st.session_state.srs_is_new = True
-                                st.toast("✨ Yeni Kelime!")
-                            except:
-                                st.error("Bağlantı hatası.")
-                    else:
-                        st.session_state.srs_active_card = card_data
+        # Zaten varsa dokunma
+        if any(item.get("word") == word for item in srs_list):
+            return
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        now_ts = time.time()
+
+        new_card = {
+            "word": word,
+            "tr": card_obj.get("tr", ""),
+            "ex": card_obj.get("ex", ""),
+            "times_seen": 0,
+            "interval": 0,
+            "ease_factor": 2.5,
+            "last_review": None,
+            "next_review_ts": now_ts,   # hemen due
+            "history": [{"date": now_str, "quality": None, "next_int": 0, "note": "created"}],
+        }
+
+        srs_list.append(new_card)
+        data["vocab_srs"] = srs_list
+        save_data(data)
+
+    # Quit/Reset: sadece UI state resetler, SRS verisini silmez
+    if st.button("🚪 Quit / Reset", type="secondary", key="vocab_exit"):
+        st.session_state.srs_active_card = None
+        st.session_state.srs_revealed = False
+        st.session_state.srs_audio = None
+        st.rerun()
+
+    # Session defaults
+    if "srs_active_card" not in st.session_state:
+        st.session_state.srs_active_card = None
+        st.session_state.srs_revealed = False
+        st.session_state.srs_audio = None
+    if "gym_session_seen" not in st.session_state:
+        st.session_state.gym_session_seen = set()
+    if "srs_is_new" not in st.session_state:
+        st.session_state.srs_is_new = False
+
+    # --- Kart seçimi ---
+    if st.session_state.srs_active_card is None:
+        card_data, card_type = get_next_srs_card(user_data, st.session_state.gym_session_seen)
+
+        if card_data:
+            if card_type == "new":
+                with st.spinner(f"Yeni kelime hazırlanıyor: {card_data['word']}..."):
+                    word_choice = card_data["word"]
+                    prompt = f"""
+                    Define the English word: "{word_choice}".
+                    TARGET LEVEL: {user_data['current_level']}.
+                    OUTPUT JSON ONLY:
+                    {{
+                        "word": "{word_choice}",
+                        "tr": "TURKISH TRANSLATION HERE (MUST BE TURKISH)",
+                        "ex": "Short English example sentence"
+                    }}
+                    """
+                    try:
+                        res = client.chat.completions.create(
+                            model="gpt-4o",
+                            messages=[{"role": "user", "content": prompt}]
+                        )
+                        full_card = strict_json_parse(res.choices[0].message.content)
+
+                        # Aktif karta ata
+                        st.session_state.srs_active_card = full_card
+                        st.session_state.srs_is_new = True
+
+                        # FIX: Daha puan verilmeden SRS'e ekle (kaybolmasın)
+                        ensure_card_in_srs(user_data, full_card)
+
+                        st.toast("✨ Yeni Kelime!")
+                    except:
+                        st.error("Bağlantı hatası.")
+                        st.session_state.srs_active_card = None
                         st.session_state.srs_is_new = False
-                        st.toast("↺ Tekrar Zamanı!")
-                    
-                    if st.session_state.srs_active_card:
-                        st.session_state.gym_session_seen.add(st.session_state.srs_active_card["word"])
-                        word = st.session_state.srs_active_card.get("word", "")
-                        tts = gTTS(text=word, lang='en')
-                        fp = io.BytesIO()
-                        tts.write_to_fp(fp)
-                        st.session_state.srs_audio = fp.getvalue()
-                else:
-                    st.info("🎉 Tebrikler! Şimdilik çalışılacak kelime kalmadı.")
 
+            else:
+                # review kartı
+                st.session_state.srs_active_card = card_data
+                st.session_state.srs_is_new = False
+                st.toast("↺ Tekrar Zamanı!")
+
+            # Ses üret
             if st.session_state.srs_active_card:
-                card = st.session_state.srs_active_card
-                st.markdown(f"""
-                    <div style="border: 2px solid #4F8BF9; border-radius: 10px; padding: 20px; text-align: center; margin-bottom: 20px;">
-                        <h1 style='color:#4F8BF9; font-size: 50px; margin:0;'>{card['word']}</h1>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                if st.session_state.srs_audio:
-                    st.audio(st.session_state.srs_audio, format="audio/mpeg")
+                word = st.session_state.srs_active_card.get("word", "")
+                tts = gTTS(text=word, lang="en")
+                fp = io.BytesIO()
+                tts.write_to_fp(fp)
+                st.session_state.srs_audio = fp.getvalue()
+        else:
+            st.info("🎉 Tebrikler! Şimdilik çalışılacak kelime kalmadı.")
 
-                if not st.session_state.srs_revealed:
-                    if st.button("👀 Show Answer", use_container_width=True):
-                        st.session_state.srs_revealed = True
-                        st.rerun()
-                else:
-                    st.success(f"🇹🇷 {card.get('tr', 'No Data')}")
-                    st.info(f"🇬🇧 {card.get('ex', 'No Data')}")
-                    
-                    if not st.session_state.srs_is_new:
-                        ef = card.get('ease_factor', 2.5)
-                        inter = card.get('interval', 0)
-                        st.caption(f"📊 Stats: Ease: {ef:.2f} | Interval: {inter} days")
+    # --- Kart UI ---
+    if st.session_state.srs_active_card:
+        card = st.session_state.srs_active_card
 
-                    st.markdown("### 🎛️ Rate Difficulty:")
-                    c1, c2, c3, c4 = st.columns(4)
-                    
-                    with c1:
-                        if st.button("🟥 Again (0)", use_container_width=True):
-                            update_srs_card_sm2(user_data, card, quality=0)
-                            st.session_state.srs_active_card = None
-                            st.session_state.srs_revealed = False
-                            st.rerun()
-                    with c2:
-                        if st.button("🟧 Hard (3)", use_container_width=True):
-                            update_srs_card_sm2(user_data, card, quality=3)
-                            st.session_state.srs_active_card = None
-                            st.session_state.srs_revealed = False
-                            st.rerun()
-                    with c3:
-                        if st.button("🟩 Good (4)", use_container_width=True):
-                            update_srs_card_sm2(user_data, card, quality=4)
-                            st.session_state.srs_active_card = None
-                            st.session_state.srs_revealed = False
-                            st.rerun()
-                    with c4:
-                        if st.button("🟦 Easy (5)", use_container_width=True):
-                            update_srs_card_sm2(user_data, card, quality=5)
-                            st.session_state.srs_active_card = None
-                            st.session_state.srs_revealed = False
-                            st.rerun()
+        st.markdown(
+            f"""
+            <div style="border: 2px solid #4F8BF9; border-radius: 10px; padding: 20px; text-align: center; margin-bottom: 20px;">
+                <h1 style='color:#4F8BF9; font-size: 50px; margin:0;'>{card.get('word','')}</h1>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        if st.session_state.srs_audio:
+            st.audio(st.session_state.srs_audio, format="audio/mpeg")
+
+        if not st.session_state.srs_revealed:
+            if st.button("👀 Show Answer", use_container_width=True):
+                st.session_state.srs_revealed = True
+                st.rerun()
+        else:
+            st.success(f"🇹🇷 {card.get('tr', 'No Data')}")
+            st.info(f"🇬🇧 {card.get('ex', 'No Data')}")
+
+            if not st.session_state.srs_is_new:
+                ef = card.get("ease_factor", 2.5)
+                inter = card.get("interval", 0)
+                st.caption(f"📊 Stats: Ease: {ef:.2f} | Interval: {inter} days")
+
+            st.markdown("### 🎛️ Rate Difficulty:")
+            c1, c2, c3, c4 = st.columns(4)
+
+            # FIX: session_seen'a kelimeyi PUAN VERİNCE ekle
+            with c1:
+                if st.button("🟥 Again (0)", use_container_width=True):
+                    update_srs_card_sm2(user_data, card, quality=0)
+                    st.session_state.gym_session_seen.add(card["word"])
+                    st.session_state.srs_active_card = None
+                    st.session_state.srs_revealed = False
+                    st.session_state.srs_audio = None
+                    st.rerun()
+
+            with c2:
+                if st.button("🟧 Hard (3)", use_container_width=True):
+                    update_srs_card_sm2(user_data, card, quality=3)
+                    st.session_state.gym_session_seen.add(card["word"])
+                    st.session_state.srs_active_card = None
+                    st.session_state.srs_revealed = False
+                    st.session_state.srs_audio = None
+                    st.rerun()
+
+            with c3:
+                if st.button("🟩 Good (4)", use_container_width=True):
+                    update_srs_card_sm2(user_data, card, quality=4)
+                    st.session_state.gym_session_seen.add(card["word"])
+                    st.session_state.srs_active_card = None
+                    st.session_state.srs_revealed = False
+                    st.session_state.srs_audio = None
+                    st.rerun()
+
+            with c4:
+                if st.button("🟦 Easy (5)", use_container_width=True):
+                    update_srs_card_sm2(user_data, card, quality=5)
+                    st.session_state.gym_session_seen.add(card["word"])
+                    st.session_state.srs_active_card = None
+                    st.session_state.srs_revealed = False
+                    st.session_state.srs_audio = None
+                    st.rerun()
+
 
         elif page == "📜 History & Stats":
             st.title("📜 Progress Log")
@@ -1228,6 +1301,7 @@ if api_key:
             st.rerun()
 else:
     st.warning("Enter API Key")
+
 
 
 
